@@ -3,6 +3,8 @@ from fastapi import FastAPI, HTTPException
 from app.routes import routes
 from app.services.document_processor import DocumentProcessor
 from app.utils.chunking import TextChunker
+from app.services.embedding_service import GeminiEmbeddingService
+from app.services.vector_store import MongoVectorStore
 
 # ===================================
 # INICIALIZACIÓN APP
@@ -29,6 +31,22 @@ def root():
 # ===================================
 # TEST DOCUMENTO
 # ===================================
+embedding_service = GeminiEmbeddingService()
+vector_store = MongoVectorStore()
+
+@app.post("/ingest")
+def ingest(file_path: str):
+    chunks = processor.process_file(file_path)
+
+    for chunk in chunks:
+        embedding = embedding_service.generate_embedding(chunk["content"])
+        vector_store.insert_document(
+            content=chunk["content"],
+            embedding=embedding,
+            metadata=chunk["metadata"]
+        )
+
+    return {"status": "Documento indexado", "chunks": len(chunks)}
 
 @app.get("/test-doc")
 def test_doc():
