@@ -23,11 +23,6 @@ class DocumentProcessor:
 
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-
-    # ==============================
-    # NORMALIZACIÓN
-    # ==============================
-
     def _normalize_text(self, text: str) -> str:
         if not text:
             return ""
@@ -67,11 +62,6 @@ class DocumentProcessor:
             start = end - self.chunk_overlap
 
         return chunks
-
-    # ==============================
-    # PDF
-    # ==============================
-
     def process_pdf(self, file_path: str):
         all_chunks = []
 
@@ -95,11 +85,6 @@ class DocumentProcessor:
             logger.exception(f"Error PDF: {e}")
 
         return all_chunks
-
-    # ==============================
-    # WORD
-    # ==============================
-
     def process_word(self, file_path: str):
         all_chunks = []
 
@@ -122,11 +107,6 @@ class DocumentProcessor:
             logger.exception(f"Error Word: {e}")
 
         return all_chunks
-
-    # ==============================
-    # EXCEL
-    # ==============================
-
     def process_excel(self, file_path: str):
         all_chunks = []
 
@@ -137,27 +117,21 @@ class DocumentProcessor:
                 file_path,
                 sheet_name=None,
                 engine="openpyxl",
-                header=None  # evita Unnamed
+                header=None
             )
 
             for sheet_name, df in sheets.items():
-
                 df = df.dropna(axis=1, how="all")
                 df = df.dropna(axis=0, how="all")
-
                 if df.empty:
                     continue
-
                 df = df.astype(str)
-
                 for idx, row in df.iterrows():
-
                     row_content = " | ".join(
                         str(val).strip()
                         for val in row
                         if val.strip().lower() != "nan"
                     )
-
                     if row_content:
                         metadata = {
                             "source": filename,
@@ -175,10 +149,6 @@ class DocumentProcessor:
             logger.exception(f"Error Excel: {e}")
 
         return all_chunks
-
-    # ==============================
-    # TXT
-    # ==============================
 
     def process_txt(self, file_path: str):
         all_chunks = []
@@ -201,10 +171,6 @@ class DocumentProcessor:
             logger.exception(f"Error TXT: {e}")
 
         return all_chunks
-
-    # ==============================
-    # ROUTER GENERAL
-    # ==============================
 
     def process_file(self, file_path: str):
 

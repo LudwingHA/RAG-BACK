@@ -5,21 +5,12 @@ from app.services.document_processor import DocumentProcessor
 from app.utils.chunking import TextChunker
 from app.services.embedding_service import GeminiEmbeddingService
 from app.services.vector_store import MongoVectorStore
-
-# ===================================
-# INICIALIZACIÓN APP
-# ===================================
+from app.services.rag_services import RAGService
 
 app = FastAPI(title="SICT BACKEND - RAG")
 
 app.include_router(routes.routes, prefix="/api")
-
-# Inicializar processor global
 processor = DocumentProcessor(chunk_size=1000, chunk_overlap=200)
-
-# ===================================
-# ROOT
-# ===================================
 
 @app.get("/")
 def root():
@@ -27,10 +18,6 @@ def root():
         "message": "SICT RAG FUNCIONANDO CORRECTAMENTE",
         "status": "OK"
     }
-
-# ===================================
-# TEST DOCUMENTO
-# ===================================
 embedding_service = GeminiEmbeddingService()
 vector_store = MongoVectorStore()
 
@@ -67,10 +54,6 @@ def test_doc():
         "total_chunks": len(chunks),
         "preview": chunks[:3] if chunks else []
     }
-
-# ===================================
-# TEST CHUNKING
-# ===================================
 
 @app.get("/test-chunk")
 def test_chunk():
@@ -109,3 +92,21 @@ def test_chunk():
         "total_chunks_after_processing": len(all_chunks),
         "first_chunk": all_chunks[0] if all_chunks else None
     }
+rag_service = RAGService(embedding_service, vector_store)
+
+@app.get("/chat")
+def chat(query: str):
+    if not query:
+        raise HTTPException(status_code=400, detail="La consulta no puede estar vacía")
+    
+    try:
+        result = rag_service.answer_question(query)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+@app.delete("/clear")
+async def clear_db():
+    vector_store.collection.delete_many({})
+    return {"status": "Base de datos limpia"}
