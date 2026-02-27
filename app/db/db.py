@@ -1,5 +1,11 @@
 from pymongo import MongoClient
 from app.core.config import settings
-client = MongoClient(settings.MONGO_URL)
-db = client[settings.DB_NAME]
-chunks_collection = db["chunks"]
+
+class Database:
+    client: MongoClient = None
+    @classmethod
+    def connect(cls):
+        if cls.client is None:
+            cls.client = MongoClient(settings.MONGO_URL)
+        return cls.client[settings.DB_NAME]
+db = Database.connect()
