@@ -6,5 +6,6 @@ class Settings:
     GEMINI_API: str = os.getenv("GEMINI_API_KEY")
     MONGO_URL: str = os.getenv("MONGO_URL")
     DB_NAME: str = 'sict_db'
+    SECRET_KEY: str = os.getenv("SECRET_KEY")
 
 settings = Settings()

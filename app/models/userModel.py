@@ -20,7 +20,10 @@ class UserInDB(UserBase):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_login: Optional[datetime] = None
 
-
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+    
 class UserResponse(UserBase):
     id: str = Field(..., alias="_id")
     created_at: datetime
