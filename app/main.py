@@ -94,13 +94,23 @@ def test_chunk():
     }
 rag_service = RAGService(embedding_service, vector_store)
 
-@app.get("/chat")
-def chat(query: str):
+# @app.get("/chat")
+# def chat(query: str):
+#     if not query:
+#         raise HTTPException(status_code=400, detail="La consulta no puede estar vacía")
+    
+#     try:
+#         result = rag_service.answer_question(query)
+#         return result
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+@app.get("/api/chat")
+async def chat(query: str, session_id: str = "user_123"):
     if not query:
-        raise HTTPException(status_code=400, detail="La consulta no puede estar vacía")
+        raise HTTPException(status_code=400, detail="Consulta vacía")
     
     try:
-        result = rag_service.answer_question(query)
+        result = rag_service.answer_question(query, session_id=session_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -32,10 +32,6 @@ class DocumentProcessor:
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
 
-    # ==============================
-    # CHUNKING
-    # ==============================
-
     def _generate_chunks(self, text: str, metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
         chunks = []
 

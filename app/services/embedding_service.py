@@ -13,7 +13,6 @@ class GeminiEmbeddingService:
         self.model = "models/gemini-embedding-001"
 
     def generate_embedding(self, text: str, is_query: bool = False) -> List[float]:
-        # Task type correcto para búsqueda semántica
         task = "retrieval_query" if is_query else "retrieval_document"
         
         try:
@@ -25,7 +24,6 @@ class GeminiEmbeddingService:
             return response["embedding"]
             
         except Exception as e:
-            # Fallback en caso de que intentes usar v4 y no esté disponible
             if "404" in str(e) and "004" in self.model:
                 print(f"Modelo {self.model} no disponible. Usando fallback a embedding-001.")
                 self.model = "models/gemini-embedding-001"
