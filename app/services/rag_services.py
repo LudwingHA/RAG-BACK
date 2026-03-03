@@ -32,7 +32,7 @@ class RAGService:
     def __init__(self, embedding_service, vector_store):
         self.embedding_service = embedding_service
         self.vector_store = vector_store
-        self.model = genai.GenerativeModel("models/gemini-1.5-flash")
+        self.model = genai.GenerativeModel("models/gemini-2.5-flash")
 
         self.user_sessions: Dict[str, genai.ChatSession] = {}
 
@@ -84,3 +84,7 @@ class RAGService:
             "user_id": user_id,  
             "confidence_top": relevant_results[0].get("score") if relevant_results else 0
         }
+    def generate_title(self, query: str):
+        prompt = f"Genera un título corto (máximo 6 palabras) para esta conversación: {query}"
+        response = self.model.generate_content(prompt)
+        return response.text.strip()
