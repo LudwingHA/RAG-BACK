@@ -7,6 +7,7 @@ from app.services.rag_services import RAGService
 from app.utils.auth_utils import get_current_user
 from app.services.ConversationService import ConversationService
 from pydantic import BaseModel
+import time
 router = APIRouter()
 processor = DocumentProcessor(chunk_size=1000, chunk_overlap=200)
 embedding_service = GeminiEmbeddingService()
@@ -50,6 +51,38 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_current_user)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+# ingest2
+@router.post("/api/ingest2")
+async def ingest(file_path: str):
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Archivo local no encontrado")
+        
+    chunks = processor.process_file(file_path) # Aquí tienes tus 1000 chunks
+    
+    batch_size = 50  # Tamaño del lote
+    for i in range(0, len(chunks), batch_size):
+        # 1. Cortamos un pedazo de la lista (ej. de la 0 a la 50)
+        batch = chunks[i : i + batch_size]
+        batch_texts = [c["content"] for c in batch]
+        
+        # 2. Obtenemos los embeddings de todo el lote en una sola llamada
+        embeddings = embedding_service.generate_embeddings_batch(batch_texts)
+        
+        if embeddings:
+            # 3. Guardamos en MongoDB
+            for j, chunk in enumerate(batch):
+                vector_store.insert_document(
+                    chunk["content"], 
+                    embeddings[j], 
+                    chunk["metadata"]
+                )
+        
+        # 4. (Opcional) Un pequeño respiro de 1 segundo para no saturar la cuota
+        time.sleep(1.2) 
+
+    return {"status": "success", "total_processed": len(chunks)}
+
 @router.get("/api/chat/history")
 async def get_history(user_id: str = Depends(get_current_user)):
     conversation = conversation_service.get_conversation(user_id)
@@ -65,13 +98,34 @@ async def get_conversations(user_id: str = Depends(get_current_user)):
     conversations = conversation_service.get_user_conversations(user_id)
     return {"conversations": conversations}
 @router.get("/api/conversations/{conversation_id}")
-async def get_conversation(conversation_id: str):
+async def get_conversation(conversation_id: str, user_id: str = Depends(get_current_user)):
+    # Obtenemos la conversación procesada (con el id como string)
     conversation = conversation_service.get_conversation(conversation_id)
+    
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    
+    # Seguridad: Verificar que la conversación pertenece al usuario que hace la petición
+    if conversation.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver esta conversación")
+        
     return conversation
+
 @router.delete("/api/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str):
-    conversation_service.delete_conversation(conversation_id)
-    return {"status": "deleted"}
+async def delete_conversation(conversation_id: str, user_id: str = Depends(get_current_user)):
+    conversation = conversation_service.get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="No se encontró la conversación")
+        
+    if conversation.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="No tienes permiso para borrar esto")
+
+    success = conversation_service.delete_conversation(conversation_id)
+    
+    if success:
+        return {"status": "deleted", "message": "Conversación eliminada correctamente"}
+    else:
+        raise HTTPException(status_code=500, detail="Error al eliminar la conversación")
 
 # --- Utilidades ---
 

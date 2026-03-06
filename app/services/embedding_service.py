@@ -33,3 +33,16 @@ class GeminiEmbeddingService:
                 status_code=500, 
                 detail=f"Error en Gemini Embedding: {str(e)}"
             )
+        
+    def generate_embeddings_batch(self, texts: list[str]):
+        """Envía una lista de textos y recibe una lista de vectores."""
+        try:
+          result = genai.embed_content(
+            model=self.model,
+            content=texts,
+            task_type="retrieval_document"
+        )
+          return result['embedding']
+        except Exception as e:
+            print(f"Error en batch embedding: {e}")
+            return None 
