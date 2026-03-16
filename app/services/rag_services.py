@@ -6,6 +6,7 @@ import logging
 from google.api_core import exceptions
 import time
 
+
 logger=logging.getLogger(__name__)
 
 genai.configure(api_key=settings.GEMINI_API)
@@ -33,9 +34,11 @@ REGLAS DE ORO:
 3. Mantén un tono formal, claro y profesional.
 4. No menciones el 'Contexto' directamente al usuario, solo usa la información.
 """
+
 class RAGService:
     def __init__(self, embedding_service, vector_store):
-        self.embedding_service = embedding_service
+        from app.services.embedding_service import LocalEmbeddingService
+        self.embedding_service = LocalEmbeddingService() 
         self.vector_store = vector_store
         self.model = genai.GenerativeModel("models/gemini-2.0-flash")
         self.user_sessions: Dict[str, genai.ChatSession] = {}
@@ -56,23 +59,25 @@ class RAGService:
 
         # 1. Recuperación Vectorial
         query_embedding = self.embedding_service.generate_embedding(query, is_query=True)
-        results = self.vector_store.search_similar(query_embedding, limit=10)
+        results = self.vector_store.search_similar(query_embedding, limit=15)
 
-        # DEBUG
-        for res in results:
-            logger.info(f"Candidato - Score: {res.get('score')} - Content: {res['content'][:50]}...")
-
-        relevant_docs = [r for r in results if r.get("score", 0) >= 0.40] 
-
-        if not relevant_docs:
-            if results:
-                logger.warning("Usando top 2 por fallback.")
-                relevant_docs = results[:2]
-            else:
-                return {"answer": "No encontré información oficial.", "sources": []}
-
-        # --- AQUÍ ESTABA EL ERROR: Faltaba retornar la respuesta final ---
+        # DEBUG mejorado
+        logger.info(f"Total de resultados: {len(results)}")
+        for res in results[:5]:  # Solo primeros 5 para no saturar logs
+            logger.info(f"Candidato - Score: {res.get('score', 0):.4f} - Content: {res['content'][:100]}...")
         
+        # CORRECCIÓN IMPORTANTE: Tu lógica estaba mal indentada
+        if results:
+            relevant_docs = results[:3] if len(results) >= 3 else results
+            
+            # Solo ajustar si scores muy bajos
+            if results[0].get("score", 0) < 0.1:
+                logger.warning("Scores muy bajos, usando solo el mejor resultado...")
+                relevant_docs = results[:1]
+        else:
+            # Este else estaba mal indentado en tu código
+            return {"answer": "No encontré información oficial.", "sources": []}
+
         # 2. Construcción de Contexto
         context = build_context(relevant_docs)
         

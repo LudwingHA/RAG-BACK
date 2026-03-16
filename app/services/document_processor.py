@@ -108,31 +108,41 @@ class DocumentProcessor:
         all_chunks = []
         try:
             filename = os.path.basename(file_path)
-            # Cargamos con la primera fila como header si es posible
             df_dict = pd.read_excel(file_path, sheet_name=None, engine="openpyxl")
 
             for sheet_name, df in df_dict.items():
                 df = df.dropna(axis=1, how="all").dropna(axis=0, how="all")
-                if df.empty: continue
+                if df.empty: 
+                    continue
                 
+                # ESTRATEGIA MEJORADA: Crear chunks contextuales más grandes
                 columns = df.columns
-                for idx, row in df.iterrows():
-                    # Formateamos como Llave: Valor para que el embedding sea más potente
-                    row_data = []
-                    for col in columns:
-                        val = str(row[col]).strip()
-                        if val.lower() != "nan" and val != "":
-                            row_data.append(f"{col}: {val}")
+                
+                # Agrupar filas relacionadas (ej: cada 5-10 filas)
+                chunk_size_rows = 5
+                for i in range(0, len(df), chunk_size_rows):
+                    chunk_df = df.iloc[i:i+chunk_size_rows]
                     
-                    row_content = " | ".join(row_data)
+                    # Crear un resumen contextual del grupo de filas
+                    chunk_content = f"SECCIÓN {sheet_name} - Filas {i+2} a {min(i+chunk_size_rows, len(df))+1}:\n"
                     
-                    if row_content:
+                    for idx, row in chunk_df.iterrows():
+                        row_data = []
+                        for col in columns:
+                            val = str(row[col]).strip()
+                            if val.lower() != "nan" and val != "":
+                                row_data.append(f"{col}: {val}")
+                        
+                        if row_data:
+                            chunk_content += f"Fila {int(idx)+2}: {' | '.join(row_data)}\n"
+                    
+                    if chunk_content.strip():
                         all_chunks.append({
-                            "content": row_content,
+                            "content": chunk_content.strip(),
                             "metadata": {
                                 "source": filename,
                                 "sheet": sheet_name,
-                                "row": int(idx) + 2, # +2 por header y base 0
+                                "rows": f"{i+2}-{min(i+chunk_size_rows, len(df))+1}",
                                 "format": "Excel"
                             }
                         })
