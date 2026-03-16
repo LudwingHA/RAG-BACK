@@ -103,47 +103,41 @@ class DocumentProcessor:
             logger.exception(f"Error Word: {e}")
 
         return all_chunks
+    
     def process_excel(self, file_path: str):
         all_chunks = []
-
         try:
             filename = os.path.basename(file_path)
+            # Cargamos con la primera fila como header si es posible
+            df_dict = pd.read_excel(file_path, sheet_name=None, engine="openpyxl")
 
-            sheets = pd.read_excel(
-                file_path,
-                sheet_name=None,
-                engine="openpyxl",
-                header=None
-            )
-
-            for sheet_name, df in sheets.items():
-                df = df.dropna(axis=1, how="all")
-                df = df.dropna(axis=0, how="all")
-                if df.empty:
-                    continue
-                df = df.astype(str)
+            for sheet_name, df in df_dict.items():
+                df = df.dropna(axis=1, how="all").dropna(axis=0, how="all")
+                if df.empty: continue
+                
+                columns = df.columns
                 for idx, row in df.iterrows():
-                    row_content = " | ".join(
-                        str(val).strip()
-                        for val in row
-                        if val.strip().lower() != "nan"
-                    )
+                    # Formateamos como Llave: Valor para que el embedding sea más potente
+                    row_data = []
+                    for col in columns:
+                        val = str(row[col]).strip()
+                        if val.lower() != "nan" and val != "":
+                            row_data.append(f"{col}: {val}")
+                    
+                    row_content = " | ".join(row_data)
+                    
                     if row_content:
-                        metadata = {
-                            "source": filename,
-                            "sheet": sheet_name,
-                            "row": int(idx) + 1,
-                            "format": "Excel"
-                        }
-
                         all_chunks.append({
                             "content": row_content,
-                            "metadata": metadata
+                            "metadata": {
+                                "source": filename,
+                                "sheet": sheet_name,
+                                "row": int(idx) + 2, # +2 por header y base 0
+                                "format": "Excel"
+                            }
                         })
-
         except Exception as e:
             logger.exception(f"Error Excel: {e}")
-
         return all_chunks
 
     def process_txt(self, file_path: str):

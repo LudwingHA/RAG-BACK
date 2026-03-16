@@ -1,7 +1,7 @@
 import os
 from fastapi import APIRouter, HTTPException, Depends
 from app.services.document_processor import DocumentProcessor
-from app.services.embedding_service import GeminiEmbeddingService
+from app.services.embedding_service import GeminiEmbeddingService, LocalEmbeddingService
 from app.services.vector_store import MongoVectorStore
 from app.services.rag_services import RAGService
 from app.utils.auth_utils import get_current_user
@@ -10,7 +10,7 @@ from pydantic import BaseModel
 import time
 router = APIRouter()
 processor = DocumentProcessor(chunk_size=1000, chunk_overlap=200)
-embedding_service = GeminiEmbeddingService()
+embedding_service = LocalEmbeddingService()
 vector_store = MongoVectorStore()
 rag_service = RAGService(embedding_service, vector_store)
 conversation_service = ConversationService()
@@ -82,7 +82,28 @@ async def ingest(file_path: str):
         time.sleep(1.2) 
 
     return {"status": "success", "total_processed": len(chunks)}
-
+@router.post("/api/ingest_v3")
+async def ingest_v3(file_path: str):
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        
+    chunks = processor.process_file(file_path)
+    texts = [c["content"] for c in chunks]
+    embeddings = embedding_service.generate_embeddings_batch(texts)
+    
+    # Preparamos la lista para inserción masiva
+    to_insert = []
+    for i, chunk in enumerate(chunks):
+        to_insert.append({
+            "content": chunk["content"],
+            "embedding": embeddings[i],
+            "metadata": chunk["metadata"]
+        })
+    
+    if to_insert:
+        vector_store.insert_many_documents(to_insert)
+        
+    return {"status": "success", "total_indexed": len(chunks)}
 @router.get("/api/chat/history")
 async def get_history(user_id: str = Depends(get_current_user)):
     conversation = conversation_service.get_conversation(user_id)
