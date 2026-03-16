@@ -1,0 +1,2 @@
+http://127.0.0.1:8000/api/admin/clear-db
+http://127.0.0.1:8000/api/ingest_v3?file_path=/Users/ludwinghernandez/Documents/Residencias/proyecto/backend/SICT_Conservacion_Carreteras_2025.xlsx
