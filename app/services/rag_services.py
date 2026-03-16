@@ -392,302 +392,548 @@ class RAGService:
             return self._formatear_respuesta_generica(relevant_docs, query)
     
     def _formatear_respuesta_obras(self, docs: List[Dict]) -> str:
-        """Formatea respuesta para consultas de obras"""
-        respuesta = "**🏗️ INFORMACIÓN DE OBRAS Y PROYECTOS SICT**\n\n"
+        """Formatea respuesta para consultas de obras - VERSIÓN MEJORADA"""
+        respuesta = []
+        respuesta.append("🏗️ **OBRAS Y PROYECTOS DE INFRAESTRUCTURA**")
+        respuesta.append("")
         
         for i, doc in enumerate(docs[:5], 1):
             metadata = doc.get('metadata', {})
-            contenido = doc['content']
-            
-            respuesta += f"**Obra/Proyecto {i}**\n"
-            
-            # Intentar extraer información estructurada
-            if ' | ' in str(contenido):
-                partes = str(contenido).split(' | ')
-                for parte in partes[:6]:  # Limitar a 6 campos
-                    respuesta += f"• {parte}\n"
-            else:
-                # Si no está estructurado, mostrar primeros 200 caracteres
-                respuesta += f"• {str(contenido)[:200]}...\n"
-            
-            # Añadir metadatos relevantes
-            if metadata.get('sheet'):
-                respuesta += f"• Hoja: {metadata.get('sheet')}\n"
-            if metadata.get('ubicacion'):
-                respuesta += f"• Ubicación: {metadata.get('ubicacion')}\n"
-            
-            respuesta += "\n"
-        
-        if len(docs) > 5:
-            respuesta += f"*... y {len(docs) - 5} documentos más*"
-        
-        return respuesta
-    
-    def _formatear_respuesta_baches(self, docs: List[Dict]) -> str:
-        """Formatea respuesta para consultas de baches"""
-        respuesta = "**🕳️ REPORTES DE BACHES Y MANTENIMIENTO VIAL**\n\n"
-        
-        total_baches = 0
-        ubicaciones = set()
-        
-        for doc in docs:
             contenido = str(doc['content'])
             
-            # Intentar extraer números
-            numeros = re.findall(r'\d+', contenido)
-            if numeros:
-                total_baches += sum(int(n) for n in numeros[:3])  # Sumar primeros números
+            respuesta.append(f"**{i}. {metadata.get('source', 'Obra SICT')}**")
             
-            # Intentar extraer ubicaciones
-            lineas = contenido.split('\n')
-            for linea in lineas:
-                if any(palabra in linea.upper() for palabra in ['UBICACIÓN', 'DIRECCIÓN', 'CALLE', 'AVENIDA']):
-                    ubicaciones.add(linea[:100])
-        
-        if total_baches > 0:
-            respuesta += f"**Total aproximado:** {total_baches} baches reportados\n\n"
-        
-        if ubicaciones:
-            respuesta += "**Ubicaciones mencionadas:**\n"
-            for ubicacion in list(ubicaciones)[:5]:
-                respuesta += f"• {ubicacion}\n"
-            respuesta += "\n"
-        
-        # Detalles de los reportes
-        respuesta += "**Detalles de reportes recientes:**\n\n"
-        for i, doc in enumerate(docs[:3], 1):
-            contenido = str(doc['content'])[:200]
-            respuesta += f"**Reporte {i}:**\n{contenido}...\n\n"
-        
-        return respuesta
-    
-    def _formatear_respuesta_presupuestos(self, docs: List[Dict]) -> str:
-        """Formatea respuesta para consultas de presupuestos"""
-        respuesta = "**💰 INFORMACIÓN PRESUPUESTAL SICT**\n\n"
-        
-        total_montos = []
-        
-        for doc in docs:
-            contenido = str(doc['content'])
+            # Extraer información clave
+            lineas = []
             
-            # Buscar montos en diferentes formatos
-            montos = re.findall(r'\$?\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s?(?:millones|mdp|pesos)?', contenido)
-            for monto in montos:
-                # Limpiar y convertir
-                monto_limpio = monto.replace(',', '')
-                try:
-                    total_montos.append(float(monto_limpio))
-                except:
-                    pass
-        
-        if total_montos:
-            respuesta += f"**Montos identificados:**\n"
-            respuesta += f"• Total aproximado: ${sum(total_montos):,.2f}\n"
-            respuesta += f"• Monto promedio: ${sum(total_montos)/len(total_montos):,.2f}\n"
-            respuesta += f"• Rango: ${min(total_montos):,.2f} - ${max(total_montos):,.2f}\n\n"
-        
-        respuesta += "**Documentos presupuestales encontrados:**\n\n"
-        for i, doc in enumerate(docs[:3], 1):
-            fuente = doc['metadata'].get('source', 'Documento')
-            sheet = doc['metadata'].get('sheet', '')
-            contenido = str(doc['content'])[:150]
-            
-            respuesta += f"**{i}. {fuente}**"
-            if sheet:
-                respuesta += f" - {sheet}"
-            respuesta += f"\n{contenido}...\n\n"
-        
-        return respuesta
-    
-    def _formatear_respuesta_personal(self, docs: List[Dict]) -> str:
-        """Formatea respuesta para consultas de personal"""
-        respuesta = "**👥 INFORMACIÓN DE PERSONAL SICT**\n\n"
-        
-        personas = []
-        puestos = set()
-        
-        for doc in docs:
-            contenido = str(doc['content'])
-            datos = {}
-            
-            # Parsear contenido estructurado
-            if ' | ' in contenido:
-                for parte in contenido.split(' | '):
-                    if ':' in parte:
-                        key, value = parte.split(':', 1)
-                        datos[key.strip()] = value.strip()
-                        
-                        if key.strip().upper() in ['PUESTO', 'CARGO']:
-                            puestos.add(value.strip())
-            
-            if datos:
-                personas.append(datos)
-        
-        if puestos:
-            respuesta += "**Puestos identificados:**\n"
-            for puesto in list(puestos)[:5]:
-                respuesta += f"• {puesto}\n"
-            respuesta += "\n"
-        
-        respuesta += "**Registros encontrados:**\n\n"
-        for i, persona in enumerate(personas[:5], 1):
-            nombre = persona.get('NOMBRE', persona.get('nombre', ''))
-            apellido = persona.get('APELLIDO', persona.get('apellido', ''))
-            puesto = persona.get('PUESTO', persona.get('CARGO', 'No especificado'))
-            
-            respuesta += f"**{i}. {nombre} {apellido}**".strip()
-            if len(respuesta.split('\n')[-1]) < 10:  # Si no hay nombre
-                respuesta += f"**Registro {i}**"
-            
-            respuesta += f"\n   • Puesto: {puesto}\n"
-            
-            # Otros datos relevantes
-            for key, value in persona.items():
-                if key.upper() not in ['NOMBRE', 'APELLIDO', 'PUESTO', 'CARGO']:
-                    respuesta += f"   • {key}: {value}\n"
-            respuesta += "\n"
-        
-        return respuesta
-    
-    def _formatear_respuesta_contratos(self, docs: List[Dict]) -> str:
-        """Formatea respuesta para consultas de contratos"""
-        respuesta = "**📄 CONTRATOS Y LICITACIONES SICT**\n\n"
-        
-        for i, doc in enumerate(docs[:3], 1):
-            metadata = doc.get('metadata', {})
-            contenido = str(doc['content'])
-            
-            respuesta += f"**Contrato/Licitación {i}**\n"
-            respuesta += f"• Fuente: {metadata.get('source', 'No especificada')}\n"
-            
-            # Buscar números de contrato
-            numeros_contrato = re.findall(r'(?:contrato|licitación)\s*(?:n[úo]m\.?)?\s*:?\s*([A-Z0-9-]+)', contenido, re.IGNORECASE)
-            if numeros_contrato:
-                respuesta += f"• Número: {numeros_contrato[0]}\n"
-            
-            # Buscar montos
-            montos = re.findall(r'\$?\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', contenido)
-            if montos:
-                respuesta += f"• Monto: ${montos[0]}\n"
+            # Buscar ubicación
+            ubicacion = self._extraer_valor(contenido, 'UBICACIÓN') or self._extraer_valor(contenido, 'DIRECCIÓN')
+            if ubicacion:
+                lineas.append(f"📍 Ubicación: {ubicacion}")
             
             # Buscar fechas
             fechas = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', contenido)
             if fechas:
-                respuesta += f"• Fecha: {fechas[0]}\n"
+                lineas.append(f"📅 Fecha: {fechas[0]}")
             
-            respuesta += "\n"
-        
-        return respuesta
-    
-    def _formatear_respuesta_normativas(self, docs: List[Dict]) -> str:
-        """Formatea respuesta para consultas de normativas"""
-        respuesta = "**📚 NORMATIVAS Y REGLAMENTOS SICT**\n\n"
-        
-        for i, doc in enumerate(docs[:5], 1):
-            metadata = doc.get('metadata', {})
-            contenido = str(doc['content'])
+            # Buscar montos
+            montos = re.findall(r'\$?\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', contenido)
+            if montos:
+                lineas.append(f"💰 Monto: ${montos[0]}")
             
-            respuesta += f"**Documento {i}:** {metadata.get('source', 'Normativa')}\n"
+            # Buscar estatus
+            estatus = self._extraer_valor(contenido, 'ESTATUS') or self._extraer_valor(contenido, 'ESTADO')
+            if estatus:
+                lineas.append(f"📊 Estatus: {estatus}")
             
-            # Buscar artículos o secciones
-            articulos = re.findall(r'(?:artículo|art\.?)\s*(\d+)', contenido, re.IGNORECASE)
-            if articulos:
-                respuesta += f"• Artículos mencionados: {', '.join(articulos[:3])}\n"
-            
-            # Mostrar primeras líneas relevantes
-            lineas = contenido.split('\n')[:3]
-            for linea in lineas:
-                if len(linea.strip()) > 20:  # Solo líneas con contenido
-                    respuesta += f"• {linea[:100]}...\n"
-            
-            respuesta += "\n"
-        
-        return respuesta
-    
-    def _formatear_respuesta_estadisticas(self, docs: List[Dict]) -> str:
-        """Formatea respuesta para consultas de estadísticas"""
-        respuesta = "**📊 ESTADÍSTICAS Y REPORTES SICT**\n\n"
-        
-        todos_numeros = []
-        
-        for doc in docs:
-            contenido = str(doc['content'])
-            
-            # Extraer todos los números
-            numeros = re.findall(r'\d+(?:\.\d+)?', contenido)
-            numeros_float = [float(n) for n in numeros if len(n) < 10]  # Ignorar IDs muy largos
-            todos_numeros.extend(numeros_float)
-        
-        if todos_numeros:
-            respuesta += f"**Resumen estadístico:**\n"
-            respuesta += f"• Total de datos numéricos: {len(todos_numeros)}\n"
-            respuesta += f"• Promedio: {sum(todos_numeros)/len(todos_numeros):.2f}\n"
-            respuesta += f"• Mínimo: {min(todos_numeros):.2f}\n"
-            respuesta += f"• Máximo: {max(todos_numeros):.2f}\n\n"
-        
-        respuesta += "**Reportes encontrados:**\n\n"
-        for i, doc in enumerate(docs[:3], 1):
-            metadata = doc.get('metadata', {})
-            contenido = str(doc['content'])[:150]
-            
-            respuesta += f"**{i}. {metadata.get('source', 'Reporte')}**\n"
-            respuesta += f"{contenido}...\n\n"
-        
-        return respuesta
-    
-    def _formatear_respuesta_inventarios(self, docs: List[Dict]) -> str:
-        """Formatea respuesta para consultas de inventarios"""
-        respuesta = "**📦 INVENTARIOS Y ACTIVOS SICT**\n\n"
-        
-        items = []
-        
-        for doc in docs:
-            contenido = str(doc['content'])
-            
-            # Buscar patrones de items en inventario
-            if ' | ' in contenido:
-                items.append(contenido[:150])
+            if lineas:
+                for linea in lineas:
+                    respuesta.append(f"  {linea}")
             else:
-                # Si es texto plano, tomar primeras líneas
-                lineas = contenido.split('\n')[:3]
-                items.extend([l for l in lineas if len(l.strip()) > 20])
-        
-        respuesta += f"**Total de registros de inventario:** {len(docs)}\n\n"
-        
-        if items:
-            respuesta += "**Items identificados:**\n"
-            for i, item in enumerate(items[:10], 1):
-                respuesta += f"{i}. {item[:80]}...\n"
-        
-        return respuesta
-    
-    def _formatear_respuesta_generica(self, docs: List[Dict], query: str) -> str:
-        """Formatea respuesta genérica para cualquier otro tipo de documento"""
-        respuesta = f"**📑 INFORMACIÓN ENCONTRADA EN DOCUMENTOS SICT**\n\n"
-        respuesta += f"**Consulta:** {query}\n"
-        respuesta += f"**Documentos relevantes:** {len(docs)}\n\n"
-        
-        for i, doc in enumerate(docs[:5], 1):
-            metadata = doc.get('metadata', {})
-            contenido = str(doc['content'])
+                # Si no hay info estructurada, mostrar preview limpio
+                preview = contenido.replace(' | ', ' • ').replace('_x000d_', '')
+                preview = preview[:150] + "..." if len(preview) > 150 else preview
+                respuesta.append(f"  {preview}")
             
-            fuente = metadata.get('source', 'Documento')
-            tipo = metadata.get('tipo_documento', metadata.get('format', 'General'))
-            sheet = metadata.get('sheet', '')
-            
-            respuesta += f"**Documento {i}:** {fuente}\n"
-            respuesta += f"**Tipo:** {tipo}\n"
-            if sheet:
-                respuesta += f"**Sección:** {sheet}\n"
-            
-            # Mostrar preview del contenido
-            preview = contenido[:200] + "..." if len(contenido) > 200 else contenido
-            respuesta += f"**Contenido:**\n{preview}\n\n"
+            respuesta.append("")
         
         if len(docs) > 5:
-            respuesta += f"*... y {len(docs) - 5} documentos más*"
+            respuesta.append(f"*... y {len(docs) - 5} obras más*")
         
-        return respuesta
+        return "\n".join(respuesta)
+        
+    def _formatear_respuesta_baches(self, docs: List[Dict]) -> str:
+        """Formatea respuesta para consultas de baches - VERSIÓN MEJORADA"""
+        respuesta = []
+        respuesta.append("🕳️ **REPORTES DE BACHES Y MANTENIMIENTO VIAL**")
+        respuesta.append("")
+        
+        ubicaciones = []
+        total_reportes = len(docs)
+        
+        for i, doc in enumerate(docs[:5], 1):
+            contenido = str(doc['content'])
+            metadata = doc.get('metadata', {})
+            
+            respuesta.append(f"**Reporte {i}**")
+            
+            # Extraer ubicación
+            for linea in contenido.split('\n'):
+                if any(p in linea.upper() for p in ['UBICACIÓN', 'DIRECCIÓN', 'CALLE', 'AVENIDA']):
+                    ubicacion = linea.replace('UBICACIÓN:', '').replace('DIRECCIÓN:', '').strip()
+                    if ubicacion and len(ubicacion) < 100:
+                        respuesta.append(f"  📍 {ubicacion}")
+                        ubicaciones.append(ubicacion)
+                        break
+            
+            # Extraer fecha
+            fechas = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', contenido)
+            if fechas:
+                respuesta.append(f"  📅 {fechas[0]}")
+            
+            # Extraer severidad
+            if 'SEVERIDAD' in contenido.upper() or 'GRAVEDAD' in contenido.upper():
+                severidad = self._extraer_valor(contenido, 'SEVERIDAD') or self._extraer_valor(contenido, 'GRAVEDAD')
+                if severidad:
+                    respuesta.append(f"  ⚠️ Severidad: {severidad}")
+            
+            # Mostrar preview del reporte
+            preview = contenido.replace('\n', ' ').strip()
+            preview = preview[:100] + "..." if len(preview) > 100 else preview
+            respuesta.append(f"  📝 {preview}")
+            respuesta.append("")
+        
+        # Resumen ejecutivo
+        respuesta.append("**📊 RESUMEN EJECUTIVO**")
+        respuesta.append(f"  • Total de reportes: {total_reportes}")
+        
+        if ubicaciones:
+            respuesta.append(f"  • Ubicaciones afectadas: {len(set(ubicaciones))}")
+            if len(set(ubicaciones)) <= 3:
+                respuesta.append(f"  • {', '.join(set(ubicaciones))}")
+        
+        return "\n".join(respuesta)
+    
+    def _formatear_respuesta_presupuestos(self, docs: List[Dict]) -> str:
+        """Formatea respuesta para consultas de presupuestos - VERSIÓN MEJORADA"""
+        respuesta = []
+        respuesta.append("💰 **INFORMACIÓN PRESUPUESTAL Y FINANCIERA**")
+        respuesta.append("")
+        
+        todos_montos = []
+        
+        for i, doc in enumerate(docs[:5], 1):
+            contenido = str(doc['content'])
+            metadata = doc.get('metadata', {})
+            
+            respuesta.append(f"**{i}. {metadata.get('source', 'Documento Presupuestal')}**")
+            
+            # Extraer concepto
+            concepto = self._extraer_valor(contenido, 'CONCEPTO') or self._extraer_valor(contenido, 'DESCRIPCIÓN')
+            if concepto:
+                respuesta.append(f"  📋 {concepto[:100]}")
+            
+            # Extraer montos
+            montos = re.findall(r'\$?\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', contenido)
+            montos_limpios = []
+            for m in montos[:3]:  # Máximo 3 montos por documento
+                try:
+                    monto_num = float(m.replace(',', ''))
+                    montos_limpios.append(monto_num)
+                    todos_montos.append(monto_num)
+                    respuesta.append(f"  💵 ${monto_num:,.2f}")
+                except:
+                    respuesta.append(f"  💵 {m}")
+            
+            # Extraer ejercicio fiscal
+            ejercicio = self._extraer_valor(contenido, 'EJERCICIO') or self._extraer_valor(contenido, 'AÑO')
+            if ejercicio:
+                respuesta.append(f"  📅 Ejercicio: {ejercicio}")
+            
+            respuesta.append("")
+        
+        # Análisis financiero
+        if todos_montos:
+            respuesta.append("**📊 ANÁLISIS FINANCIERO**")
+            respuesta.append(f"  • Monto total: ${sum(todos_montos):,.2f}")
+            respuesta.append(f"  • Promedio: ${sum(todos_montos)/len(todos_montos):,.2f}")
+            respuesta.append(f"  • Mínimo: ${min(todos_montos):,.2f}")
+            respuesta.append(f"  • Máximo: ${max(todos_montos):,.2f}")
+        
+        return "\n".join(respuesta)
+    
+    def _formatear_respuesta_personal(self, docs: List[Dict]) -> str:
+        """Formatea respuesta para consultas de personal - VERSIÓN MEJORADA"""
+        respuesta = []
+        respuesta.append("👥 **PERSONAL DE LA SICT**")
+        respuesta.append("")
+        
+        personas = []
+        puestos = Counter()
+        
+        # Procesar documentos
+        for doc in docs:
+            contenido = str(doc['content'])
+            
+            # Si es el formato con pipes
+            if ' | ' in contenido:
+                datos = {}
+                for parte in contenido.split(' | '):
+                    if ':' in parte:
+                        key, value = parte.split(':', 1)
+                        datos[key.strip()] = value.strip()
+                
+                if datos:
+                    personas.append(datos)
+                    puesto = datos.get('PUESTO', datos.get('CARGO', 'No especificado'))
+                    puestos[puesto] += 1
+        
+        if not personas:
+            return self._formatear_respuesta_generica(docs, "personal")
+        
+        # Mostrar personas en formato tabla
+        for i, p in enumerate(personas[:10], 1):
+            nombre = p.get('NOMBRE', '')
+            apellido = p.get('APELLIDO', '')
+            nombre_completo = f"{nombre} {apellido}".strip()
+            
+            if not nombre_completo:
+                nombre_completo = f"Registro {i}"
+            
+            linea = f"**{i}. {nombre_completo}**"
+            puesto = p.get('PUESTO', p.get('CARGO', ''))
+            if puesto:
+                linea += f" — *{puesto}*"
+            respuesta.append(linea)
+            
+            # Detalles adicionales en una línea
+            detalles = []
+            if p.get('EDAD'):
+                detalles.append(f"Edad: {p['EDAD']}")
+            if p.get('NACIONALIDAD'):
+                detalles.append(f"Nac: {p['NACIONALIDAD']}")
+            if p.get('DEPENDENCIA'):
+                detalles.append(f"Dep: {p['DEPENDENCIA']}")
+            
+            if detalles:
+                respuesta.append(f"  ▫️ {' | '.join(detalles)}")
+            respuesta.append("")
+        
+        # Resumen
+        respuesta.append("**📊 RESUMEN**")
+        respuesta.append(f"  • Total de personas: {len(personas)}")
+        
+        if puestos:
+            respuesta.append("  • Puestos principales:")
+            for puesto, count in puestos.most_common(3):
+                respuesta.append(f"    - {puesto}: {count}")
+        
+        if len(personas) > 10:
+            respuesta.append(f"\n*... y {len(personas) - 10} personas más*")
+        
+        return "\n".join(respuesta)
+    
+    def _formatear_respuesta_contratos(self, docs: List[Dict]) -> str:
+        """Formatea respuesta para consultas de contratos - VERSIÓN MEJORADA"""
+        respuesta = []
+        respuesta.append("📄 **CONTRATOS Y LICITACIONES**")
+        respuesta.append("")
+        
+        for i, doc in enumerate(docs[:5], 1):
+            contenido = str(doc['content'])
+            metadata = doc.get('metadata', {})
+            
+            respuesta.append(f"**Contrato {i}**")
+            
+            # Número de contrato
+            num_contrato = (
+                self._extraer_valor(contenido, 'CONTRATO') or 
+                self._extraer_valor(contenido, 'NÚMERO') or
+                re.search(r'[A-Z0-9]{5,15}', contenido)
+            )
+            if num_contrato:
+                respuesta.append(f"  🏷️ Número: {num_contrato}")
+            
+            # Proveedor
+            proveedor = self._extraer_valor(contenido, 'PROVEEDOR') or self._extraer_valor(contenido, 'CONTRATISTA')
+            if proveedor:
+                respuesta.append(f"  🏢 Proveedor: {proveedor}")
+            
+            # Monto
+            monto = self._extraer_valor(contenido, 'MONTO')
+            if monto:
+                respuesta.append(f"  💰 Monto: ${monto}")
+            else:
+                montos = re.findall(r'\$?\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', contenido)
+                if montos:
+                    respuesta.append(f"  💰 Monto: ${montos[0]}")
+            
+            # Fechas
+            fechas = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', contenido)
+            if fechas:
+                fecha_str = f"  📅 "
+                if len(fechas) >= 2:
+                    fecha_str += f"Inicio: {fechas[0]} | Fin: {fechas[1]}"
+                else:
+                    fecha_str += f"Fecha: {fechas[0]}"
+                respuesta.append(fecha_str)
+            
+            # Estatus
+            estatus = self._extraer_valor(contenido, 'ESTATUS')
+            if estatus:
+                respuesta.append(f"  📊 Estatus: {estatus}")
+            
+            respuesta.append("")
+        
+        return "\n".join(respuesta)
+    
+    def _formatear_respuesta_normativas(self, docs: List[Dict]) -> str:
+        """Formatea respuesta para consultas de normativas - VERSIÓN MEJORADA"""
+        respuesta = []
+        respuesta.append("📚 **NORMATIVAS Y REGLAMENTOS**")
+        respuesta.append("")
+        
+        for i, doc in enumerate(docs[:5], 1):
+            contenido = str(doc['content'])
+            metadata = doc.get('metadata', {})
+            
+            titulo = metadata.get('source', 'Documento Normativo')
+            if metadata.get('sheet'):
+                titulo += f" - {metadata.get('sheet')}"
+            
+            respuesta.append(f"**{i}. {titulo}**")
+            
+            # Buscar artículos citados
+            articulos = re.findall(r'(?:Artículo|Art\.?)\s*(\d+)', contenido, re.IGNORECASE)
+            if articulos:
+                respuesta.append(f"  📌 Artículos: {', '.join(articulos[:5])}")
+            
+            # Buscar capítulos o secciones
+            capitulos = re.findall(r'(?:Capítulo|Cap\.?)\s*(\d+|[IVXLCDM]+)', contenido, re.IGNORECASE)
+            if capitulos:
+                respuesta.append(f"  📑 Capítulos: {', '.join(capitulos[:3])}")
+            
+            # Mostrar primeras líneas relevantes
+            lineas = contenido.split('\n')
+            texto_relevante = []
+            for linea in lineas[:5]:
+                linea_limpia = linea.strip()
+                if linea_limpia and len(linea_limpia) > 20 and 'Fuente:' not in linea_limpia:
+                    texto_relevante.append(linea_limpia[:100])
+            
+            if texto_relevante:
+                respuesta.append(f"  📝 {texto_relevante[0]}")
+            
+            respuesta.append("")
+        
+        return "\n".join(respuesta)
+    
+    def _formatear_respuesta_estadisticas(self, docs: List[Dict]) -> str:
+        """Formatea respuesta para consultas de estadísticas - VERSIÓN MEJORADA"""
+        respuesta = []
+        respuesta.append("📊 **ESTADÍSTICAS Y REPORTES**")
+        respuesta.append("")
+        
+        todos_numeros = []
+        categorias = Counter()
+        
+        for doc in docs:
+            contenido = str(doc['content'])
+            metadata = doc.get('metadata', {})
+            
+            # Identificar categoría
+            categoria = metadata.get('tipo_documento', 'General')
+            categorias[categoria] += 1
+            
+            # Extraer números
+            numeros = re.findall(r'\d+(?:\.\d+)?', contenido)
+            numeros_float = [float(n) for n in numeros if len(n) < 6 and float(n) < 1000000]
+            todos_numeros.extend(numeros_float)
+        
+        # Resumen estadístico general
+        if todos_numeros:
+            respuesta.append("**📈 RESUMEN ESTADÍSTICO**")
+            respuesta.append(f"  • Total de datos: {len(todos_numeros)}")
+            respuesta.append(f"  • Promedio: {sum(todos_numeros)/len(todos_numeros):.2f}")
+            respuesta.append(f"  • Mediana: {sorted(todos_numeros)[len(todos_numeros)//2]:.2f}")
+            respuesta.append(f"  • Mínimo: {min(todos_numeros):.2f}")
+            respuesta.append(f"  • Máximo: {max(todos_numeros):.2f}")
+            respuesta.append("")
+        
+        # Distribución por categoría
+        if categorias:
+            respuesta.append("**📁 DISTRIBUCIÓN POR TIPO**")
+            for cat, count in categorias.most_common():
+                respuesta.append(f"  • {cat}: {count} documento(s)")
+            respuesta.append("")
+        
+        # Lista de reportes
+        respuesta.append("**📋 REPORTES DISPONIBLES**")
+        for i, doc in enumerate(docs[:5], 1):
+            metadata = doc.get('metadata', {})
+            fuente = metadata.get('source', 'Reporte').replace('.xlsx', '').replace('.pdf', '')
+            respuesta.append(f"  {i}. {fuente}")
+        
+        return "\n".join(respuesta)
+    def _formatear_respuesta_inventarios(self, docs: List[Dict]) -> str:
+        """Formatea respuesta para consultas de inventarios - VERSIÓN MEJORADA"""
+        respuesta = []
+        respuesta.append("📦 **INVENTARIOS Y ACTIVOS**")
+        respuesta.append("")
+        
+        items_totales = 0
+        categorias = Counter()
+        
+        for i, doc in enumerate(docs[:3], 1):
+            contenido = str(doc['content'])
+            metadata = doc.get('metadata', {})
+            
+            fuente = metadata.get('source', 'Inventario')
+            respuesta.append(f"**{i}. {fuente}**")
+            
+            # Contar items en este documento
+            if ' | ' in contenido:
+                items = contenido.split(' | ')
+                items_totales += len(items)
+                
+                # Mostrar algunos items
+                for item in items[:5]:
+                    item_limpio = item.replace('_x000d_', '').strip()
+                    if ':' in item_limpio:
+                        respuesta.append(f"  • {item_limpio}")
+                    else:
+                        respuesta.append(f"  • {item_limpio[:80]}")
+            else:
+                # Si es texto plano, contar líneas con contenido
+                lineas = [l for l in contenido.split('\n') if l.strip() and len(l.strip()) > 10]
+                items_totales += len(lineas)
+                
+                for linea in lineas[:5]:
+                    respuesta.append(f"  • {linea[:80]}")
+            
+            respuesta.append("")
+        
+        # Resumen
+        respuesta.append("**📊 RESUMEN DE INVENTARIO**")
+        respuesta.append(f"  • Total de documentos: {len(docs)}")
+        respuesta.append(f"  • Total aproximado de items: {items_totales}")
+        
+        return "\n".join(respuesta)
+    
+    def _formatear_respuesta_generica(self, docs: List[Dict], query: str) -> str:
+        """Formatea respuesta genérica - VERSIÓN MEJORADA Y LIMPIA"""
+        respuesta = []
+        
+        # Detectar tipo de consulta
+        query_lower = query.lower()
+        
+        # Si es consulta de conteo
+        if any(word in query_lower for word in ['cuantos', 'cuántos', 'total', 'número', 'cantidad']):
+            return self._formatear_respuesta_conteo(docs, query)
+        
+        # Si es consulta de lista
+        if any(word in query_lower for word in ['lista', 'listado', 'muestra', 'dime']):
+            respuesta.append("📋 **RESULTADO DE BÚSQUEDA**")
+        else:
+            respuesta.append("📑 **INFORMACIÓN ENCONTRADA**")
+        
+        respuesta.append("")
+        respuesta.append(f"**Consulta:** {query}")
+        respuesta.append(f"**Documentos relevantes:** {len(docs)}")
+        respuesta.append("")
+        
+        # Agrupar por archivo
+        archivos = {}
+        for doc in docs:
+            fuente = doc['metadata'].get('source', 'Documento')
+            if fuente not in archivos:
+                archivos[fuente] = []
+            archivos[fuente].append(doc)
+        
+        # Mostrar información agrupada
+        for fuente, docs_fuente in archivos.items():
+            respuesta.append(f"**📁 {fuente}**")
+            
+            for i, doc in enumerate(docs_fuente[:5], 1):
+                contenido = doc['content']
+                metadata = doc.get('metadata', {})
+                
+                # Si es un registro de persona, formatear bonito
+                if 'NOMBRE:' in contenido and 'APELLIDO:' in contenido:
+                    nombre = self._extraer_valor(contenido, 'NOMBRE')
+                    apellido = self._extraer_valor(contenido, 'APELLIDO')
+                    puesto = self._extraer_valor(contenido, 'PUESTO') or self._extraer_valor(contenido, 'CARGO')
+                    
+                    linea = f"  • {nombre} {apellido}".strip()
+                    if puesto:
+                        linea += f" — *{puesto}*"
+                    respuesta.append(linea)
+                else:
+                    # Contenido genérico - limpiar y mostrar
+                    preview = contenido.replace(' | ', ' • ').replace('_x000d_', '')
+                    preview = preview.replace('NOMBRE:', '**Nombre:**').replace('APELLIDO:', '**Apellido:**')
+                    preview = preview[:100] + "..." if len(preview) > 100 else preview
+                    respuesta.append(f"  • {preview}")
+            
+            if len(docs_fuente) > 5:
+                respuesta.append(f"  *... y {len(docs_fuente) - 5} registros más*")
+            respuesta.append("")
+        
+        return "\n".join(respuesta)
+    def _extraer_valor(self, texto: str, campo: str) -> str:
+        """Extrae el valor de un campo específico del texto"""
+        patron = rf'{campo}:\s*([^|]+)'
+        match = re.search(patron, texto)
+        return match.group(1).strip() if match else ""
+
+    def _formatear_respuesta_conteo(self, docs: List[Dict], query: str) -> str:
+        """Formatea respuestas de conteo de manera limpia"""
+        respuesta = []
+        respuesta.append("📊 **RESULTADO DE CONTEO**")
+        respuesta.append("")
+        
+        # Determinar qué estamos contando
+        if 'nombre' in query.lower() or 'persona' in query.lower():
+            # Contar personas únicas
+            personas = set()
+            for doc in docs:
+                nombre = self._extraer_valor(doc['content'], 'NOMBRE')
+                apellido = self._extraer_valor(doc['content'], 'APELLIDO')
+                if nombre or apellido:
+                    personas.add(f"{nombre} {apellido}".strip())
+            
+            respuesta.append(f"**Total de personas encontradas:** {len(personas)}")
+            respuesta.append("")
+            
+            if personas:
+                respuesta.append("**Lista de personas:**")
+                for persona in sorted(personas)[:10]:
+                    respuesta.append(f"  • {persona}")
+                if len(personas) > 10:
+                    respuesta.append(f"  *... y {len(personas) - 10} más*")
+        
+        return "\n".join(respuesta)
+
+    def _formatear_respuesta_personal_mejorada(self, docs: List[Dict]) -> str:
+        """Formatea información de personal de manera más visual"""
+        respuesta = []
+        respuesta.append("👥 **PERSONAL ENCONTRADO**")
+        respuesta.append("")
+        
+        personas = []
+        for doc in docs:
+            contenido = doc['content']
+            persona = {
+                'nombre': self._extraer_valor(contenido, 'NOMBRE'),
+                'apellido': self._extraer_valor(contenido, 'APELLIDO'),
+                'puesto': self._extraer_valor(contenido, 'PUESTO') or self._extraer_valor(contenido, 'CARGO'),
+                'edad': self._extraer_valor(contenido, 'EDAD'),
+                'nacionalidad': self._extraer_valor(contenido, 'NACIONALIDAD')
+            }
+            if persona['nombre'] or persona['apellido']:
+                personas.append(persona)
+        
+        # Mostrar en formato tabla limpia
+        for i, p in enumerate(personas, 1):
+            nombre_completo = f"{p['nombre']} {p['apellido']}".strip()
+            linea = f"**{i}. {nombre_completo}**"
+            if p['puesto']:
+                linea += f" — *{p['puesto']}*"
+            respuesta.append(linea)
+            
+            detalles = []
+            if p['edad']:
+                detalles.append(f"Edad: {p['edad']}")
+            if p['nacionalidad']:
+                detalles.append(f"Nacionalidad: {p['nacionalidad']}")
+            
+            if detalles:
+                respuesta.append(f"   ▫️ {' | '.join(detalles)}")
+            respuesta.append("")
+        
+        respuesta.append(f"**Total:** {len(personas)} personas")
+        
+        return "\n".join(respuesta)
 
     def answer_question(self, query: str, user_id: str) -> Dict:
         """
