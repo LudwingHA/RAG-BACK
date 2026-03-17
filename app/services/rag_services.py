@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from pymongo import MongoClient, ASCENDING, DESCENDING
 import re
 import json
+from collections import Counter
+
 
 logger = logging.getLogger(__name__)
 
@@ -543,13 +545,16 @@ class RAGService:
         return "\n".join(respuesta)
     
     def _formatear_respuesta_personal(self, docs: List[Dict]) -> str:
-        """Formatea respuesta para consultas de personal - VERSIÓN MEJORADA"""
+        """Formatea respuesta para consultas de personal - VERSIÓN CON LIMPIEZA"""
         respuesta = []
         respuesta.append("👥 **PERSONAL DE LA SICT**")
         respuesta.append("")
         
         personas = []
         puestos = Counter()
+        
+        # Palabras a ignorar (headers)
+        ignorar = {'NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD', 'PUESTO', 'NUM_EMPLEADO'}
         
         # Procesar documentos
         for doc in docs:
@@ -561,39 +566,60 @@ class RAGService:
                 for parte in contenido.split(' | '):
                     if ':' in parte:
                         key, value = parte.split(':', 1)
-                        datos[key.strip()] = value.strip()
+                        key = key.strip()
+                        value = value.strip()
+                        
+                        # Limpiar valores que son headers
+                        if value not in ignorar and len(value) > 1:
+                            datos[key] = value
+                            
+                            if key.upper() in ['PUESTO', 'CARGO'] and value not in ignorar:
+                                puestos[value] += 1
                 
-                if datos:
+                # Solo agregar si tiene al menos un nombre o apellido válido
+                nombre_valido = datos.get('NOMBRE', '') not in ignorar and len(datos.get('NOMBRE', '')) > 1
+                apellido_valido = datos.get('APELLIDO', '') not in ignorar and len(datos.get('APELLIDO', '')) > 1
+                
+                if nombre_valido or apellido_valido:
                     personas.append(datos)
-                    puesto = datos.get('PUESTO', datos.get('CARGO', 'No especificado'))
-                    puestos[puesto] += 1
         
         if not personas:
-            return self._formatear_respuesta_generica(docs, "personal")
+            # Fallback: intentar extraer de otra manera
+            return "No se encontró información de personal en formato válido."
         
         # Mostrar personas en formato tabla
         for i, p in enumerate(personas[:10], 1):
             nombre = p.get('NOMBRE', '')
             apellido = p.get('APELLIDO', '')
+            
+            # Validar que no sean headers
+            if nombre in ignorar:
+                nombre = ''
+            if apellido in ignorar:
+                apellido = ''
+            
             nombre_completo = f"{nombre} {apellido}".strip()
             
             if not nombre_completo:
-                nombre_completo = f"Registro {i}"
+                # Intentar construir de otras formas
+                otros_campos = [v for k, v in p.items() if k not in ignorar and len(v) > 2]
+                if otros_campos:
+                    nombre_completo = otros_campos[0]
+                else:
+                    nombre_completo = f"Persona {i}"
             
             linea = f"**{i}. {nombre_completo}**"
             puesto = p.get('PUESTO', p.get('CARGO', ''))
-            if puesto:
+            if puesto and puesto not in ignorar:
                 linea += f" — *{puesto}*"
             respuesta.append(linea)
             
             # Detalles adicionales en una línea
             detalles = []
-            if p.get('EDAD'):
+            if p.get('EDAD') and p['EDAD'] not in ignorar:
                 detalles.append(f"Edad: {p['EDAD']}")
-            if p.get('NACIONALIDAD'):
+            if p.get('NACIONALIDAD') and p['NACIONALIDAD'] not in ignorar:
                 detalles.append(f"Nac: {p['NACIONALIDAD']}")
-            if p.get('DEPENDENCIA'):
-                detalles.append(f"Dep: {p['DEPENDENCIA']}")
             
             if detalles:
                 respuesta.append(f"  ▫️ {' | '.join(detalles)}")
@@ -606,7 +632,8 @@ class RAGService:
         if puestos:
             respuesta.append("  • Puestos principales:")
             for puesto, count in puestos.most_common(3):
-                respuesta.append(f"    - {puesto}: {count}")
+                if puesto not in ignorar:
+                    respuesta.append(f"    - {puesto}: {count}")
         
         if len(personas) > 10:
             respuesta.append(f"\n*... y {len(personas) - 10} personas más*")
@@ -867,32 +894,133 @@ class RAGService:
         return match.group(1).strip() if match else ""
 
     def _formatear_respuesta_conteo(self, docs: List[Dict], query: str) -> str:
-        """Formatea respuestas de conteo de manera limpia"""
+        """Formatea respuestas de conteo de manera limpia - VERSIÓN CON LIMPIEZA"""
         respuesta = []
-        respuesta.append("📊 **RESULTADO DE CONTEO**")
+        respuesta.append("🔢 **RESULTADO DE CONTEO**")
         respuesta.append("")
         
-        # Determinar qué estamos contando
-        if 'nombre' in query.lower() or 'persona' in query.lower():
-            # Contar personas únicas
+        # Detectar qué estamos contando
+        query_lower = query.lower()
+        
+        # Contar personas (VERSIÓN MEJORADA CON LIMPIEZA)
+        if any(word in query_lower for word in ['nombre', 'persona', 'empleado', 'trabajador']):
             personas = set()
+            
             for doc in docs:
-                nombre = self._extraer_valor(doc['content'], 'NOMBRE')
-                apellido = self._extraer_valor(doc['content'], 'APELLIDO')
-                if nombre or apellido:
-                    personas.add(f"{nombre} {apellido}".strip())
+                contenido = doc['content']
+                
+                # LIMPIEZA: Eliminar texto repetido y basura
+                if 'NOMBRE:' in contenido:
+                    # Extraer solo los nombres reales
+                    partes = contenido.split(' | ')
+                    for parte in partes:
+                        if parte.startswith('NOMBRE:'):
+                            nombre = parte.replace('NOMBRE:', '').strip()
+                            # Ignorar si es un encabezado o texto repetido
+                            if nombre and nombre not in ['NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD']:
+                                # Limpiar nombres que parecen listas
+                                if ',' in nombre:
+                                    # Si tiene comas, tomar solo el primer nombre real
+                                    nombres_lista = [n.strip() for n in nombre.split(',') if n.strip() and len(n.strip()) > 2]
+                                    for n in nombres_lista:
+                                        if n not in ['NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD']:
+                                            personas.add(n)
+                                else:
+                                    personas.add(nombre)
+                        
+                        elif parte.startswith('APELLIDO:'):
+                            apellido = parte.replace('APELLIDO:', '').strip()
+                            # Similar limpieza para apellidos
+                            if apellido and apellido not in ['NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD']:
+                                if ',' in apellido:
+                                    apellidos_lista = [a.strip() for a in apellido.split(',') if a.strip() and len(a.strip()) > 2]
+                                    for a in apellidos_lista:
+                                        if a not in ['NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD']:
+                                            # Buscamos si ya tenemos este apellido asociado a algún nombre
+                                            pass
+                                else:
+                                    # No podemos agregar solo apellidos sin nombre
+                                    pass
             
-            respuesta.append(f"**Total de personas encontradas:** {len(personas)}")
-            respuesta.append("")
-            
+            # Si encontramos nombres, mostrarlos
             if personas:
-                respuesta.append("**Lista de personas:**")
-                for persona in sorted(personas)[:10]:
-                    respuesta.append(f"  • {persona}")
-                if len(personas) > 10:
-                    respuesta.append(f"  *... y {len(personas) - 10} más*")
+                # Filtrar nombres válidos (más de 2 caracteres y no son headers)
+                personas_validas = {p for p in personas if len(p) > 2 and p not in ['NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD']}
+                
+                respuesta.append(f"**Total de personas:** {len(personas_validas)}")
+                
+                if personas_validas:
+                    respuesta.append("")
+                    respuesta.append("**Lista de personas:**")
+                    for persona in sorted(personas_validas):
+                        respuesta.append(f"  • {persona}")
+            else:
+                # Fallback: intentar extraer de otra manera
+                nombres_encontrados = self._extraer_nombres_de_documentos(docs)
+                if nombres_encontrados:
+                    respuesta.append(f"**Total de personas:** {len(nombres_encontrados)}")
+                    respuesta.append("")
+                    respuesta.append("**Lista de personas:**")
+                    for nombre in sorted(nombres_encontrados):
+                        respuesta.append(f"  • {nombre}")
+                else:
+                    respuesta.append(f"**Total de registros:** {len(docs)}")
+        
+        # Contar documentos
+        elif 'documento' in query_lower or 'archivo' in query_lower:
+            respuesta.append(f"**Total de documentos:** {len(docs)}")
+            
+            # Agrupar por tipo
+            tipos = Counter()
+            for doc in docs:
+                tipo = doc['metadata'].get('format', 'Desconocido')
+                tipos[tipo] += 1
+            
+            if tipos:
+                respuesta.append("")
+                respuesta.append("**Por tipo:**")
+                for tipo, count in tipos.items():
+                    respuesta.append(f"  • {tipo}: {count}")
+        
+        # Conteo genérico
+        else:
+            respuesta.append(f"**Total de registros encontrados:** {len(docs)}")
         
         return "\n".join(respuesta)
+
+    def _extraer_nombres_de_documentos(self, docs: List[Dict]) -> set:
+        """Extrae nombres reales de los documentos"""
+        nombres = set()
+        
+        # Lista de palabras a ignorar (headers, etc.)
+        ignorar = {'NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD', 'PUESTO', 'NUM_EMPLEADO'}
+        
+        for doc in docs:
+            contenido = doc['content']
+            
+            # Buscar patrones de nombre/apellido
+            lineas = contenido.split('\n')
+            for linea in lineas:
+                # Buscar líneas con formato "NOMBRE: X | APELLIDO: Y"
+                if 'NOMBRE:' in linea and 'APELLIDO:' in linea:
+                    partes = linea.split(' | ')
+                    nombre = ''
+                    apellido = ''
+                    
+                    for parte in partes:
+                        if parte.startswith('NOMBRE:'):
+                            nombre = parte.replace('NOMBRE:', '').strip()
+                        elif parte.startswith('APELLIDO:'):
+                            apellido = parte.replace('APELLIDO:', '').strip()
+                    
+                    # Validar que sean nombres reales
+                    if nombre and nombre not in ignorar and len(nombre) > 2:
+                        if apellido and apellido not in ignorar and len(apellido) > 2:
+                            nombres.add(f"{nombre} {apellido}".strip())
+                        else:
+                            nombres.add(nombre)
+        
+        return nombres
 
     def _formatear_respuesta_personal_mejorada(self, docs: List[Dict]) -> str:
         """Formatea información de personal de manera más visual"""
