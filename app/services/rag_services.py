@@ -103,7 +103,7 @@ class CacheManager:
             'obra': ['obra', 'proyecto', 'construcción', 'infraestructura', 'carretera', 'puente', 'vial'],
             'bache': ['bache', 'baches', 'mantenimiento vial', 'reparación', 'pavimento'],
             'presupuesto': ['presupuesto', 'costo', 'gasto', 'inversión', 'monto', 'millones', 'pesos'],
-            'personal': ['persona', 'empleado', 'trabajador', 'funcionario', 'director', 'encargado'],
+            'personal': ['persona', 'empleado', 'trabajador', 'funcionario', 'director', 'encargado', 'residente', 'supervisor'],
             'contrato': ['contrato', 'licitación', 'proveedor', 'adjudicación'],
             'normativa': ['norma', 'reglamento', 'ley', 'lineamiento', 'procedimiento'],
             'estadistica': ['estadística', 'dato', 'indicador', 'métrica', 'reporte'],
@@ -357,6 +357,12 @@ class RAGService:
         
         # ===== RESPUESTAS ESPECIALIZADAS POR TIPO =====
         
+        # 0. CONSULTAS POR CARGO ESPECÍFICO (RESIDENTES, SUPERVISORES, ETC)
+        cargos_especificos = ['residente', 'residentes', 'supervisor', 'supervisores', 
+                              'director', 'directora', 'ejecutivo', 'ejecutiva']
+        if any(cargo in query_lower for cargo in cargos_especificos):
+            return self._formatear_respuesta_por_cargo(relevant_docs, query)
+        
         # 1. OBRAS/INFRAESTRUCTURA
         if any(word in query_lower for word in ['obra', 'proyecto', 'carretera', 'puente', 'construcción']):
             return self._formatear_respuesta_obras(relevant_docs)
@@ -370,7 +376,7 @@ class RAGService:
             return self._formatear_respuesta_presupuestos(relevant_docs)
         
         # 4. PERSONAL/RECURSOS HUMANOS
-        elif any(word in query_lower for word in ['personal', 'empleado', 'trabajador', 'funcionario', 'director']):
+        elif any(word in query_lower for word in ['personal', 'empleado', 'trabajador', 'funcionario', 'director', 'lista']):
             return self._formatear_respuesta_personal(relevant_docs)
         
         # 5. CONTRATOS/LICITACIONES
@@ -392,6 +398,126 @@ class RAGService:
         # 9. RESPUESTA GENÉRICA PARA OTROS TIPOS
         else:
             return self._formatear_respuesta_generica(relevant_docs, query)
+    def _formatear_respuesta_por_cargo(self, docs: List[Dict], query: str) -> str:
+        """
+        Formatea respuesta para consultas de personal por cargo específico
+        Ejemplo: "quienes son residentes?", "cuantos residentes hay?"
+        """
+        respuesta = []
+        
+        # Detectar qué cargo se está buscando
+        query_lower = query.lower()
+        cargo_buscado = ""
+        
+        # Verificar si es consulta de conteo
+        es_conteo = any(word in query_lower for word in ['cuantos', 'cuántos', 'total'])
+        
+        # Mapeo de variantes de cargos
+        variantes_cargos = {
+            'RESIDENTE': ['residente', 'residentes', 'residencias'],
+            'SUPERVISOR': ['supervisor', 'supervisores', 'supervisión', 'sup'],
+            'DIRECTOR': ['director', 'directora', 'directores', 'dirección'],
+            'EJECUTIVO': ['ejecutivo', 'ejecutiva', 'ejecutivos'],
+            'ENCARGADO': ['encargado', 'encargada', 'encargados']
+        }
+        
+        # Identificar el cargo buscado
+        for cargo_base, variantes in variantes_cargos.items():
+            if any(v in query_lower for v in variantes):
+                cargo_buscado = cargo_base
+                break
+        
+        if not cargo_buscado:
+            # Si no se detecta, intentar extraer la palabra después de "son"
+            match = re.search(r'son\s+(\w+)', query_lower)
+            if match:
+                cargo_buscado = match.group(1).upper()
+        
+        personas = []
+        palabras_ignorar = {'NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD', 'PUESTO'}
+        
+        # Usar set para eliminar duplicados (por nombre)
+        nombres_vistos = set()
+        
+        for doc in docs:
+            contenido = doc['content']
+            metadata = doc.get('metadata', {})
+            
+            # Buscar en el contenido
+            if ' | ' in contenido:
+                partes = contenido.split(' | ')
+                datos = {}
+                for parte in partes:
+                    if ':' in parte:
+                        key, value = parte.split(':', 1)
+                        datos[key.strip()] = value.strip()
+                
+                # Verificar si el cargo coincide
+                puesto = datos.get('PUESTO', datos.get('CARGO', '')).upper()
+                
+                # Comparar con variantes
+                es_del_cargo = False
+                if cargo_buscado in puesto or any(v.upper() in puesto for v in variantes_cargos.get(cargo_buscado, [])):
+                    es_del_cargo = True
+                
+                if es_del_cargo:
+                    nombre = datos.get('NOMBRE', '')
+                    apellido = datos.get('APELLIDO', '')
+                    
+                    if nombre and nombre not in palabras_ignorar:
+                        nombre_completo = f"{nombre} {apellido}".strip()
+                        
+                        # Evitar duplicados
+                        if nombre_completo not in nombres_vistos:
+                            nombres_vistos.add(nombre_completo)
+                            
+                            persona = {
+                                'nombre': nombre_completo,
+                                'puesto': datos.get('PUESTO', datos.get('CARGO', '')),
+                                'edad': datos.get('EDAD', ''),
+                                'nacionalidad': datos.get('NACIONALIDAD', '')
+                            }
+                            personas.append(persona)
+        
+        if not personas:
+            return f"**No se encontraron personas con el cargo '{cargo_buscado}'**"
+        
+        # Si es consulta de conteo
+        if es_conteo:
+            respuesta.append(f"🔢 **RESULTADO DE CONTEO**")
+            respuesta.append("")
+            respuesta.append(f"**Total de personas con cargo {cargo_buscado}:** {len(personas)}")
+            if personas:
+                respuesta.append("")
+                respuesta.append("**Lista de personas:**")
+                for persona in personas:
+                    respuesta.append(f"  • {persona['nombre']}")
+            return "\n".join(respuesta)
+        
+        # Si es consulta de lista
+        respuesta.append(f"👥 **PERSONAL CON CARGO {cargo_buscado}**")
+        respuesta.append("")
+        
+        for i, persona in enumerate(personas, 1):
+            linea = f"**{i}. {persona['nombre']}**"
+            if persona['puesto'] and persona['puesto'] not in palabras_ignorar:
+                linea += f" — *{persona['puesto']}*"
+            respuesta.append(linea)
+            
+            detalles = []
+            if persona.get('edad') and persona['edad'] not in palabras_ignorar:
+                detalles.append(f"Edad: {persona['edad']}")
+            if persona.get('nacionalidad') and persona['nacionalidad'] not in palabras_ignorar:
+                detalles.append(f"Nac: {persona['nacionalidad']}")
+            
+            if detalles:
+                respuesta.append(f"  ▫️ {' | '.join(detalles)}")
+            respuesta.append("")
+        
+        # Resumen
+        respuesta.append(f"**Total:** {len(personas)} personas")
+        
+        return "\n".join(respuesta)
     
     def _formatear_respuesta_obras(self, docs: List[Dict]) -> str:
         """Formatea respuesta para consultas de obras - VERSIÓN MEJORADA"""
@@ -443,7 +569,7 @@ class RAGService:
             respuesta.append(f"*... y {len(docs) - 5} obras más*")
         
         return "\n".join(respuesta)
-        
+    
     def _formatear_respuesta_baches(self, docs: List[Dict]) -> str:
         """Formatea respuesta para consultas de baches - VERSIÓN MEJORADA"""
         respuesta = []
@@ -782,6 +908,7 @@ class RAGService:
             respuesta.append(f"  {i}. {fuente}")
         
         return "\n".join(respuesta)
+    
     def _formatear_respuesta_inventarios(self, docs: List[Dict]) -> str:
         """Formatea respuesta para consultas de inventarios - VERSIÓN MEJORADA"""
         respuesta = []
@@ -887,6 +1014,7 @@ class RAGService:
             respuesta.append("")
         
         return "\n".join(respuesta)
+    
     def _extraer_valor(self, texto: str, campo: str) -> str:
         """Extrae el valor de un campo específico del texto"""
         patron = rf'{campo}:\s*([^|]+)'
@@ -1079,16 +1207,14 @@ class RAGService:
                 logger.info(f"⚡ Respuesta desde cache en {cached_response['tiempo_respuesta_ms']}ms")
                 return cached_response
         
-        # ===== 2. RECUPERACIÓN VECTORIAL =====
+        # ===== 2. RECUPERACIÓN VECTORIAL MEJORADA =====
         chat = self._get_user_session(user_id)
         
         query_embedding = self.embedding_service.generate_embedding(query, is_query=True)
-        results = self.vector_store.search_similar(query_embedding, limit=15)
+        results = self.vector_store.search_similar(query_embedding, limit=30)  # Aumentar límite
 
         logger.info(f"Total de resultados: {len(results)}")
-        for res in results[:5]:
-            logger.info(f"Candidato - Score: {res.get('score', 0):.4f} - Tipo: {res.get('metadata', {}).get('tipo_documento', 'N/A')}")
-
+        
         if not results:
             respuesta_base = {
                 "answer": "No se encontró información en los documentos institucionales.",
@@ -1105,7 +1231,57 @@ class RAGService:
             respuesta_base['from_cache'] = False
             return respuesta_base
 
-        relevant_docs = results[:5] if len(results) >= 5 else results
+        # ===== 3. CLASIFICAR Y PRIORIZAR RESULTADOS =====
+        query_lower = query.lower()
+        
+        # Separar por tipo de contenido
+        chunks_personal = []
+        chunks_resumen = []
+        chunks_otros = []
+        
+        # Set para eliminar duplicados (por contenido)
+        contenidos_vistos = set()
+        resultados_unicos = []
+        
+        for r in results:
+            contenido = r['content']
+            metadata = r.get('metadata', {})
+            tipo_contenido = metadata.get('tipo_contenido', '')
+            source = metadata.get('source', '')
+            
+            # Crear clave única para evitar duplicados
+            contenido_key = contenido[:200]  # Usar primeros 200 chars como clave
+            if contenido_key in contenidos_vistos:
+                continue
+            contenidos_vistos.add(contenido_key)
+            
+            # Clasificar
+            if tipo_contenido in ['registro_personal', 'resumen_personal'] or 'NOMBRE:' in contenido:
+                chunks_personal.append(r)
+            elif 'RESUMEN' in str(contenido).upper() and 'OBRAS' in str(contenido).upper():
+                chunks_resumen.append(r)
+            else:
+                chunks_otros.append(r)
+        
+        # Priorizar según el tipo de consulta
+        if any(word in query_lower for word in ['persona', 'quien', 'empleado', 'residente', 'supervisor']):
+            # Consultas de personal: priorizar chunks de personal
+            relevant_docs = (chunks_personal[:8] + chunks_otros[:2])[:10]
+            logger.info(f"Priorizando personal: {len(chunks_personal)} chunks encontrados")
+        elif any(word in query_lower for word in ['cuantos', 'cuántos', 'total']):
+            # Consultas de conteo: incluir resúmenes
+            relevant_docs = (chunks_personal[:5] + chunks_resumen[:3] + chunks_otros[:2])[:10]
+        else:
+            # Otras consultas: balanceado
+            relevant_docs = (chunks_personal[:4] + chunks_resumen[:3] + chunks_otros[:3])[:10]
+        
+        if not relevant_docs:
+            relevant_docs = results[:5]
+        
+        # Logging
+        logger.info(f"Chunks seleccionados: Personal={len([d for d in relevant_docs if 'NOMBRE:' in d['content']])}, " +
+                    f"Resumen={len([d for d in relevant_docs if 'RESUMEN' in d['content']])}")
+        
         context = build_context(relevant_docs)
         
         # Detectar tipos de documentos para logging
@@ -1113,21 +1289,21 @@ class RAGService:
         
         prompt = f"""{SYSTEM_PROMPT}
 
-CONTEXTO OFICIAL (documentos recuperados):
-{context}
+    CONTEXTO OFICIAL (documentos recuperados):
+    {context}
 
-PREGUNTA DEL USUARIO: {query}
+    PREGUNTA DEL USUARIO: {query}
 
-INSTRUCCIONES ESPECÍFICAS:
-- Utiliza EXCLUSIVAMENTE la información del contexto
-- Si el contexto contiene datos de obras, presupuestos, personal u otros, adáptate
-- Para datos numéricos, preséntalos de forma clara
-- Si encuentras información parcial, sé honesto al respecto
+    INSTRUCCIONES ESPECÍFICAS:
+    - Utiliza EXCLUSIVAMENTE la información del contexto
+    - Si el contexto contiene datos de obras, presupuestos, personal u otros, adáptate
+    - Para datos numéricos, preséntalos de forma clara
+    - Si encuentras información parcial, sé honesto al respecto
 
-RESPUESTA:
-"""
+    RESPUESTA:
+    """
         
-        # ===== 3. INTENTAR CON GEMINI =====
+        # ===== 4. INTENTAR CON GEMINI =====
         try:
             response = self.safe_execute(chat.send_message, prompt)
             
@@ -1144,8 +1320,11 @@ RESPUESTA:
         except Exception as e:
             logger.error(f"Error con Gemini, usando fallback: {e}")
             
-            # ===== 4. FALLBACK GENÉRICO =====
-            fallback_answer = self._generar_respuesta_fallback_generica(query, relevant_docs)
+            # ===== 5. FALLBACK ESPECIALIZADO =====
+            if any(word in query_lower for word in ['residente', 'residentes']):
+                fallback_answer = self._formatear_respuesta_por_cargo(relevant_docs, query)
+            else:
+                fallback_answer = self._generar_respuesta_fallback_generica(query, relevant_docs)
             
             respuesta_final = {
                 "answer": fallback_answer,
@@ -1158,7 +1337,7 @@ RESPUESTA:
                 "from_cache": False
             }
         
-        # ===== 5. GUARDAR EN CACHE =====
+        # ===== 6. GUARDAR EN CACHE =====
         if self.cache_manager:
             self.cache_manager.guardar(query, respuesta_final, user_id)
             logger.info(f"💾 Respuesta guardada en cache para: {query[:50]}...")
