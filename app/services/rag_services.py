@@ -291,7 +291,7 @@ class RAGService:
         
         self.embedding_service = LocalEmbeddingService()
         self.vector_store = vector_store
-        self.model = genai.GenerativeModel("models/gemini-1.5-flash")
+        self.model = genai.GenerativeModel("models/gemini-2.5-flash")
         self.user_sessions: Dict[str, genai.ChatSession] = {}
         
         if hasattr(vector_store, 'client'):
