@@ -9,6 +9,7 @@ pwd_context = CryptContext(
     deprecated="auto"
 )
 
+
 class UserService:
     def __init__(self):
         self.collection = db["users"]
@@ -114,6 +115,7 @@ class UserService:
         """
         Cambiar la contraseña del usuario
         """
+        print(f"datos de password data, {password_data}")
         try:
             # Verificar si el usuario existe
             user = self.get_user_by_id(user_id)

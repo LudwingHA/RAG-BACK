@@ -92,10 +92,13 @@ async def change_password(
     password_data: PasswordChange,
     current_user_id: str = Depends(get_current_user)
 ):
+   
     """
     Cambiar la contraseña del usuario actual
     """
+    print(password_data)
     result = user_service.change_password(current_user_id, password_data)
+
     
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
