@@ -38,7 +38,6 @@ class DocumentProcessor:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         
-        # Palabras a ignorar en todos los documentos (headers, basura)
         self.ignorar_global = {
             'NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD', 'PUESTO',
             'NUM_EMPLEADO', 'DEPENDENCIA', 'AREA', 'FECHA', 'NOM', 'AP', 'LAST',
@@ -52,7 +51,6 @@ class DocumentProcessor:
             'ESTATUS', 'ESTADO', 'OBSERVACIONES', 'COMENTARIOS'
         }
         
-        # Patrones para detectar tipos de documento
         self.patrones_tipos = {
             'PERSONAL': ['NOMBRE', 'APELLIDO', 'RFC', 'CURP', 'PUESTO', 'EMPLEADO'],
             'OBRAS': ['OBRA', 'PROYECTO', 'CARRETERA', 'PUENTE', 'INFRAESTRUCTURA', 'CONSTRUCCIÓN'],
@@ -108,7 +106,6 @@ class DocumentProcessor:
         valor_upper = valor.upper().strip()
         valor_limpio = valor.strip()
         
-        # Reglas de validación
         if len(valor_limpio) < 2:
             return False
         
@@ -118,15 +115,12 @@ class DocumentProcessor:
         if valor_upper == header.upper():
             return False
         
-        # Ignorar valores que son solo números de teléfono/IDs muy largos
         if re.match(r'^\d{10,}$', valor_limpio):
             return False
         
-        # Ignorar valores con "Unnamed"
         if 'UNNAMED' in valor_upper:
             return False
         
-        # Ignorar valores que son listas separadas por comas de headers
         if ',' in valor:
             partes = [p.strip().upper() for p in valor.split(',')]
             if all(p in self.ignorar_global for p in partes if p):
@@ -143,11 +137,9 @@ class DocumentProcessor:
         
         valor_str = str(valor).strip()
         
-        # Limpiar caracteres especiales
         valor_str = re.sub(r'[\n\r\t]', ' ', valor_str)
         valor_str = re.sub(r'\s+', ' ', valor_str)
         
-        # Eliminar prefijos comunes
         valor_str = re.sub(r'^:\s*', '', valor_str)
         valor_str = re.sub(r'^\|\s*', '', valor_str)
         
@@ -239,11 +231,7 @@ class DocumentProcessor:
         if puntajes:
             return max(puntajes, key=puntajes.get)
         return 'GENERAL'
-
-    # =========================================================================
-    # PROCESADOR DE EXCEL - VERSIÓN DEFINITIVA
-    # =========================================================================
-
+    
     def process_excel(self, file_path: str) -> List[Dict[str, Any]]:
         """
         Procesador DEFINITIVO para Excel SICT.
@@ -263,35 +251,27 @@ class DocumentProcessor:
             filename = os.path.basename(file_path)
             logger.info(f"📊 Procesando Excel SICT: {filename}")
             
-            # 1. DETECTAR TIPO DE DOCUMENTO
             tipo_documento = self._detectar_tipo_documento_sict(filename)
             logger.info(f"📋 Tipo detectado: {tipo_documento}")
             
-            # 2. LECTURA ROBUSTA
             excel_file = self._leer_excel_robusto(file_path)
             if not excel_file:
                 raise Exception("No se pudo leer el Excel")
             
-            # 3. PROCESAR CADA HOJA
             for sheet_name in excel_file.sheet_names:
                 try:
                     logger.info(f"  Procesando hoja: {sheet_name}")
                     
-                    # 4. LEER HOJA CON MÚLTIPLES ESTRATEGIAS
                     df = self._leer_hoja_inteligente(excel_file, sheet_name)
                     if df is None or df.empty:
                         continue
                     
-                    # 5. LIMPIEZA GENERAL
                     df = self._limpiar_dataframe(df)
                     
-                    # 6. DETECTAR ENCABEZADOS
                     headers, header_row_idx = self._detectar_encabezados(df)
                     
-                    # 7. IDENTIFICAR COLUMNAS POR TIPO
                     columnas_por_tipo = self._clasificar_columnas(headers, df, header_row_idx)
                     
-                    # 8. PROCESAR SEGÚN TIPO DE DOCUMENTO
                     chunks_hoja = self._procesar_por_tipo(
                         df, headers, header_row_idx, filename, sheet_name,
                         tipo_documento, columnas_por_tipo
@@ -299,7 +279,6 @@ class DocumentProcessor:
                     
                     all_chunks.extend(chunks_hoja)
                     
-                    # 9. CREAR RESUMEN ESPECIALIZADO
                     resumen = self._crear_resumen_tipo(
                         chunks_hoja, filename, sheet_name, tipo_documento
                     )
@@ -310,14 +289,13 @@ class DocumentProcessor:
                     logger.error(f"Error en hoja {sheet_name}: {e}")
                     continue
             
-            # 10. CREAR CHUNK DE METADATOS
             all_chunks.append(self._crear_metadatos(filename, tipo_documento, len(all_chunks)))
             
             elapsed = time.time() - start_time
-            logger.info(f"✅ Excel procesado: {len(all_chunks)} chunks en {elapsed:.2f}s")
+            logger.info(f"Excel procesado: {len(all_chunks)} chunks en {elapsed:.2f}s")
             
         except Exception as e:
-            logger.exception(f"💥 Error crítico: {e}")
+            logger.exception(f"[Error crítico]: {e}")
             all_chunks.append(self._crear_chunk_error(filename, str(e)))
         
         return all_chunks
@@ -352,10 +330,8 @@ class DocumentProcessor:
 
     def _limpiar_dataframe(self, df):
         """Limpieza general del DataFrame"""
-        # Eliminar filas/columnas vacías
         df = df.dropna(how='all', axis=0).dropna(how='all', axis=1)
         
-        # Eliminar filas de separadores
         mask = df.apply(lambda row: row.astype(str).str.contains('^-+$|^=+$|^_+$').any(), axis=1)
         df = df[~mask]
         
@@ -363,12 +339,10 @@ class DocumentProcessor:
 
     def _detectar_encabezados(self, df):
         """Detecta la fila de encabezados"""
-        # Buscar en primeras 10 filas
         for idx in range(min(10, len(df))):
             row = df.iloc[idx]
             row_text = ' '.join([str(x).upper() for x in row if pd.notna(x)])
             
-            # Contar coincidencias con palabras conocidas
             matches = sum(1 for palabra in self.ignorar_global if palabra in row_text)
             
             if matches >= 2:
@@ -377,7 +351,6 @@ class DocumentProcessor:
                 logger.info(f"  Encabezados detectados en fila {idx+1}")
                 return headers, idx
         
-        # Si no detectó, crear encabezados genéricos
         return [f'COL_{j+1}' for j in range(len(df.columns))], -1
 
     def _clasificar_columnas(self, headers, df, header_row_idx):
@@ -395,7 +368,6 @@ class DocumentProcessor:
         for j, header in enumerate(headers):
             header_upper = header.upper()
             
-            # Clasificar por nombre de columna
             if any(p in header_upper for p in ['NOMBRE', 'APELLIDO', 'EMPLEADO']):
                 tipos['nombre'].append(j)
             elif any(p in header_upper for p in ['FECHA', 'PERIODO', 'EJERCICIO']):
@@ -431,17 +403,16 @@ class DocumentProcessor:
         chunks = []
         data_start = header_row_idx + 1 if header_row_idx >= 0 else 0
         
-        # Colecciones para resúmenes
         registros_validos = []
         
         for idx in range(data_start, len(df)):
             row = df.iloc[idx]
             
-            # Saltar filas vacías
+
             if row.isna().all():
                 continue
             
-            # Procesar según tipo
+
             if tipo_documento == 'PERSONAL':
                 chunk = self._procesar_fila_personal(row, headers, idx, filename, sheet_name)
             elif tipo_documento == 'OBRAS':

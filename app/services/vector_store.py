@@ -22,7 +22,6 @@ class MongoVectorStore:
         ¡Mucho más rápido para archivos grandes de la SICT!
         """
         if documents:
-            # MongoDB Atlas recomienda insert_many para rendimiento
             self.collection.insert_many(documents)
 
     def search_similar(
@@ -40,7 +39,7 @@ class MongoVectorStore:
                     "index": "vector_index", 
                     "path": "embedding",
                     "queryVector": query_embedding,
-                    "numCandidates": 300, # Aumentado para mayor precisión
+                    "numCandidates": 300, 
                     "limit": limit
                 }
             },
@@ -57,7 +56,7 @@ class MongoVectorStore:
             {
                 "$project": {
                     "_id": 0,
-                    "embedding": 0 # No enviamos el vector al LLM
+                    "embedding": 0 
                 }
             }
         ]

@@ -49,11 +49,9 @@ class GeminiEmbeddingService:
             return None 
 class LocalEmbeddingService:
     def __init__(self):
-        # Modelo optimizado para español y muy ligero (corre en cualquier CPU)
         self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
     def generate_embedding(self, text: str, is_query: bool = False) -> list:
-        # Generación local: 0ms de latencia de red, 0 costo, 0 límites
         return self.model.encode(text).tolist()
 
     def generate_embeddings_batch(self, texts: list[str]):

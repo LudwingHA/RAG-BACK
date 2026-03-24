@@ -5,7 +5,6 @@ from typing import List, Dict
 
 router = APIRouter()
 
-# Configuramos la API (esto suele ir en el arranque de la app)
 genai.configure(api_key=settings.GEMINI_API)
 
 @router.get("/api/gemini-models")
@@ -17,9 +16,7 @@ async def get_available_models():
     try:
         available_models = []
         
-        # Iteramos sobre los modelos que la API permite ver
         for m in genai.list_models():
-            # Filtramos solo los que sirven para chat/generación de texto
             if 'generateContent' in m.supported_generation_methods:
                 model_data = {
                     "id": m.name,

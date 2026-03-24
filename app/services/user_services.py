@@ -62,17 +62,16 @@ class UserService:
         Actualizar el perfil del usuario
         """
         try:
-            # Verificar si el usuario existe
             user = self.get_user_by_id(user_id)
             if not user:
                 return None
             
-            # Preparar datos de actualización
+
             update_data = {}
             
-            # Si se está actualizando el email, verificar que no esté en uso
+
             if profile_data.email:
-                # Verificar si el email ya existe para otro usuario
+
                 existing_user = self.collection.find_one({
                     "email": profile_data.email.lower().strip(),
                     "_id": {"$ne": ObjectId(user_id)}
@@ -81,16 +80,14 @@ class UserService:
                     return {"error": "El email ya está en uso por otro usuario"}
                 update_data["email"] = profile_data.email.lower().strip()
             
-            # Agregar solo los campos que se enviaron
+
             for field, value in profile_data.model_dump(exclude_unset=True).items():
-                if value is not None and field != 'email':  # Email ya procesado
+                if value is not None and field != 'email': 
                     update_data[field] = value
             
-            # Siempre actualizar el timestamp
             update_data["updated_at"] = datetime.now(timezone.utc)
             
             if update_data:
-                # Actualizar el usuario
                 result = self.collection.update_one(
                     {"_id": ObjectId(user_id)},
                     {"$set": update_data}
@@ -99,10 +96,8 @@ class UserService:
                 if result.modified_count == 0:
                     return {"error": "No se pudo actualizar el perfil"}
             
-            # Obtener el usuario actualizado
             updated_user = self.get_user_by_id(user_id)
             if updated_user:
-                # Remover campos sensibles
                 updated_user.pop("hashed_password", None)
                 updated_user["_id"] = str(updated_user["_id"])
                 
@@ -117,22 +112,19 @@ class UserService:
         """
         print(f"datos de password data, {password_data}")
         try:
-            # Verificar si el usuario existe
+
             user = self.get_user_by_id(user_id)
             if not user:
                 return {"error": "Usuario no encontrado"}
             
-            # Verificar la contraseña actual
             if not self.verify_password(password_data.current_password, user["hashed_password"]):
                 return {"error": "Contraseña actual incorrecta"}
             
-            # Validar que las nuevas contraseñas coincidan
             try:
                 password_data.validate_passwords()
             except ValueError as e:
                 return {"error": str(e)}
             
-            # Actualizar la contraseña y el timestamp
             new_hashed_password = self.hash_password(password_data.new_password)
             
             result = self.collection.update_one(
@@ -160,7 +152,6 @@ class UserService:
         try:
             user = self.get_user_by_id(user_id)
             if user:
-                # Remover campos sensibles
                 user.pop("hashed_password", None)
                 user["_id"] = str(user["_id"])
                 return user

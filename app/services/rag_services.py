@@ -121,7 +121,6 @@ class CacheManager:
         """Obtiene una respuesta del cache"""
         query_hash = self._generar_query_hash(query, user_id)
         
-        # 1. Buscar en memoria
         if query_hash in self.memory_cache:
             cached = self.memory_cache[query_hash]
             if time.time() - cached['timestamp'] < self.ttl_segundos:
@@ -131,7 +130,6 @@ class CacheManager:
             else:
                 del self.memory_cache[query_hash]
         
-        # 2. Buscar en MongoDB
         try:
             cached = self.cache_collection.find_one({"query_hash": query_hash})
             if cached:
@@ -177,7 +175,6 @@ class CacheManager:
             }
         }
         
-        # Guardar en MongoDB
         try:
             self.cache_collection.update_one(
                 {"query_hash": query_hash},
@@ -188,7 +185,6 @@ class CacheManager:
         except Exception as e:
             logger.warning(f"Error guardando en MongoDB: {e}")
         
-        # Guardar en memoria
         self._guardar_en_memoria(query_hash, cache_data)
     
     def _guardar_en_memoria(self, query_hash: str, cache_data: Dict):
@@ -233,7 +229,6 @@ class CacheManager:
         try:
             total_mongodb = self.cache_collection.count_documents({})
             
-            # Estadísticas por tipo de consulta
             pipeline = [
                 {"$group": {
                     "_id": "$tipo_consulta",
@@ -244,7 +239,6 @@ class CacheManager:
             ]
             tipos_stats = list(self.cache_collection.aggregate(pipeline))
             
-            # Top preguntas más frecuentes
             top_preguntas = list(self.cache_collection.find(
                 {},
                 {"query": 1, "frecuencia": 1, "tipo_consulta": 1, "ultimo_acceso": 1}
@@ -324,78 +318,70 @@ class RAGService:
         if not relevant_docs:
             return "No se encontró información relevante en los documentos."
         
-        # Analizar los documentos para determinar el tipo de contenido
         tipos_contenido = set()
         palabras_clave_totales = []
         tiene_numeros = False
         tiene_fechas = False
         total_registros = len(relevant_docs)
         
-        # Primer pase: análisis de contenido
         for doc in relevant_docs:
             contenido = doc['content']
             metadata = doc.get('metadata', {})
             
-            # Detectar tipo por metadata
             if 'tipo_documento' in metadata:
                 tipos_contenido.add(metadata['tipo_documento'])
             
-            # Detectar números
+
             if re.search(r'\d+\.?\d*', str(contenido)):
                 tiene_numeros = True
             
-            # Detectar fechas
             if re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', str(contenido)):
                 tiene_fechas = True
             
-            # Extraer palabras clave del contenido
             palabras = re.findall(r'\b[A-ZÁÉÍÓÚÑ]{4,}\b', str(contenido).upper())
             palabras_clave_totales.extend(palabras[:10])
         
-        # Detectar tipo de consulta
         query_lower = query.lower()
         
-        # ===== RESPUESTAS ESPECIALIZADAS POR TIPO =====
-        
-        # 0. CONSULTAS POR CARGO ESPECÍFICO (RESIDENTES, SUPERVISORES, ETC)
+
         cargos_especificos = ['residente', 'residentes', 'supervisor', 'supervisores', 
                               'director', 'directora', 'ejecutivo', 'ejecutiva']
         if any(cargo in query_lower for cargo in cargos_especificos):
             return self._formatear_respuesta_por_cargo(relevant_docs, query)
         
-        # 1. OBRAS/INFRAESTRUCTURA
+
         if any(word in query_lower for word in ['obra', 'proyecto', 'carretera', 'puente', 'construcción']):
             return self._formatear_respuesta_obras(relevant_docs)
         
-        # 2. BACHES/MANTENIMIENTO
+
         elif any(word in query_lower for word in ['bache', 'baches', 'mantenimiento', 'reparación']):
             return self._formatear_respuesta_baches(relevant_docs)
         
-        # 3. PRESUPUESTOS/FINANZAS
+
         elif any(word in query_lower for word in ['presupuesto', 'costo', 'gasto', 'inversión', 'millones', 'pesos']):
             return self._formatear_respuesta_presupuestos(relevant_docs)
         
-        # 4. PERSONAL/RECURSOS HUMANOS
+
         elif any(word in query_lower for word in ['personal', 'empleado', 'trabajador', 'funcionario', 'director', 'lista']):
             return self._formatear_respuesta_personal(relevant_docs)
         
-        # 5. CONTRATOS/LICITACIONES
+
         elif any(word in query_lower for word in ['contrato', 'licitación', 'proveedor']):
             return self._formatear_respuesta_contratos(relevant_docs)
         
-        # 6. NORMATIVAS/REGLAMENTOS
+
         elif any(word in query_lower for word in ['norma', 'reglamento', 'ley', 'lineamiento']):
             return self._formatear_respuesta_normativas(relevant_docs)
         
-        # 7. ESTADÍSTICAS/REPORTES
+
         elif any(word in query_lower for word in ['estadística', 'reporte', 'dato', 'indicador']):
             return self._formatear_respuesta_estadisticas(relevant_docs)
         
-        # 8. INVENTARIOS/ACTIVOS
+
         elif any(word in query_lower for word in ['inventario', 'bien', 'activo', 'equipo']):
             return self._formatear_respuesta_inventarios(relevant_docs)
         
-        # 9. RESPUESTA GENÉRICA PARA OTROS TIPOS
+
         else:
             return self._formatear_respuesta_generica(relevant_docs, query)
     def _formatear_respuesta_por_cargo(self, docs: List[Dict], query: str) -> str:
@@ -405,14 +391,12 @@ class RAGService:
         """
         respuesta = []
         
-        # Detectar qué cargo se está buscando
         query_lower = query.lower()
         cargo_buscado = ""
         
-        # Verificar si es consulta de conteo
         es_conteo = any(word in query_lower for word in ['cuantos', 'cuántos', 'total'])
         
-        # Mapeo de variantes de cargos
+
         variantes_cargos = {
             'RESIDENTE': ['residente', 'residentes', 'residencias'],
             'SUPERVISOR': ['supervisor', 'supervisores', 'supervisión', 'sup'],
@@ -421,14 +405,14 @@ class RAGService:
             'ENCARGADO': ['encargado', 'encargada', 'encargados']
         }
         
-        # Identificar el cargo buscado
+
         for cargo_base, variantes in variantes_cargos.items():
             if any(v in query_lower for v in variantes):
                 cargo_buscado = cargo_base
                 break
         
         if not cargo_buscado:
-            # Si no se detecta, intentar extraer la palabra después de "son"
+
             match = re.search(r'son\s+(\w+)', query_lower)
             if match:
                 cargo_buscado = match.group(1).upper()
@@ -436,14 +420,14 @@ class RAGService:
         personas = []
         palabras_ignorar = {'NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD', 'PUESTO'}
         
-        # Usar set para eliminar duplicados (por nombre)
+
         nombres_vistos = set()
         
         for doc in docs:
             contenido = doc['content']
             metadata = doc.get('metadata', {})
             
-            # Buscar en el contenido
+
             if ' | ' in contenido:
                 partes = contenido.split(' | ')
                 datos = {}
@@ -452,10 +436,10 @@ class RAGService:
                         key, value = parte.split(':', 1)
                         datos[key.strip()] = value.strip()
                 
-                # Verificar si el cargo coincide
+
                 puesto = datos.get('PUESTO', datos.get('CARGO', '')).upper()
                 
-                # Comparar con variantes
+
                 es_del_cargo = False
                 if cargo_buscado in puesto or any(v.upper() in puesto for v in variantes_cargos.get(cargo_buscado, [])):
                     es_del_cargo = True
@@ -467,7 +451,7 @@ class RAGService:
                     if nombre and nombre not in palabras_ignorar:
                         nombre_completo = f"{nombre} {apellido}".strip()
                         
-                        # Evitar duplicados
+
                         if nombre_completo not in nombres_vistos:
                             nombres_vistos.add(nombre_completo)
                             
@@ -482,7 +466,6 @@ class RAGService:
         if not personas:
             return f"**No se encontraron personas con el cargo '{cargo_buscado}'**"
         
-        # Si es consulta de conteo
         if es_conteo:
             respuesta.append(f"🔢 **RESULTADO DE CONTEO**")
             respuesta.append("")
@@ -494,7 +477,6 @@ class RAGService:
                     respuesta.append(f"  • {persona['nombre']}")
             return "\n".join(respuesta)
         
-        # Si es consulta de lista
         respuesta.append(f"👥 **PERSONAL CON CARGO {cargo_buscado}**")
         respuesta.append("")
         
@@ -514,7 +496,6 @@ class RAGService:
                 respuesta.append(f"  ▫️ {' | '.join(detalles)}")
             respuesta.append("")
         
-        # Resumen
         respuesta.append(f"**Total:** {len(personas)} personas")
         
         return "\n".join(respuesta)
@@ -531,25 +512,21 @@ class RAGService:
             
             respuesta.append(f"**{i}. {metadata.get('source', 'Obra SICT')}**")
             
-            # Extraer información clave
+
             lineas = []
             
-            # Buscar ubicación
             ubicacion = self._extraer_valor(contenido, 'UBICACIÓN') or self._extraer_valor(contenido, 'DIRECCIÓN')
             if ubicacion:
                 lineas.append(f"📍 Ubicación: {ubicacion}")
             
-            # Buscar fechas
             fechas = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', contenido)
             if fechas:
                 lineas.append(f"📅 Fecha: {fechas[0]}")
             
-            # Buscar montos
             montos = re.findall(r'\$?\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', contenido)
             if montos:
                 lineas.append(f"💰 Monto: ${montos[0]}")
             
-            # Buscar estatus
             estatus = self._extraer_valor(contenido, 'ESTATUS') or self._extraer_valor(contenido, 'ESTADO')
             if estatus:
                 lineas.append(f"📊 Estatus: {estatus}")
@@ -558,7 +535,6 @@ class RAGService:
                 for linea in lineas:
                     respuesta.append(f"  {linea}")
             else:
-                # Si no hay info estructurada, mostrar preview limpio
                 preview = contenido.replace(' | ', ' • ').replace('_x000d_', '')
                 preview = preview[:150] + "..." if len(preview) > 150 else preview
                 respuesta.append(f"  {preview}")
@@ -585,7 +561,6 @@ class RAGService:
             
             respuesta.append(f"**Reporte {i}**")
             
-            # Extraer ubicación
             for linea in contenido.split('\n'):
                 if any(p in linea.upper() for p in ['UBICACIÓN', 'DIRECCIÓN', 'CALLE', 'AVENIDA']):
                     ubicacion = linea.replace('UBICACIÓN:', '').replace('DIRECCIÓN:', '').strip()
@@ -594,25 +569,23 @@ class RAGService:
                         ubicaciones.append(ubicacion)
                         break
             
-            # Extraer fecha
             fechas = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', contenido)
             if fechas:
                 respuesta.append(f"  📅 {fechas[0]}")
             
-            # Extraer severidad
+
             if 'SEVERIDAD' in contenido.upper() or 'GRAVEDAD' in contenido.upper():
                 severidad = self._extraer_valor(contenido, 'SEVERIDAD') or self._extraer_valor(contenido, 'GRAVEDAD')
                 if severidad:
                     respuesta.append(f"  ⚠️ Severidad: {severidad}")
             
-            # Mostrar preview del reporte
+
             preview = contenido.replace('\n', ' ').strip()
             preview = preview[:100] + "..." if len(preview) > 100 else preview
             respuesta.append(f"  📝 {preview}")
             respuesta.append("")
         
-        # Resumen ejecutivo
-        respuesta.append("**📊 RESUMEN EJECUTIVO**")
+        respuesta.append("**RESUMEN EJECUTIVO**")
         respuesta.append(f"  • Total de reportes: {total_reportes}")
         
         if ubicaciones:
@@ -636,15 +609,15 @@ class RAGService:
             
             respuesta.append(f"**{i}. {metadata.get('source', 'Documento Presupuestal')}**")
             
-            # Extraer concepto
+
             concepto = self._extraer_valor(contenido, 'CONCEPTO') or self._extraer_valor(contenido, 'DESCRIPCIÓN')
             if concepto:
                 respuesta.append(f"  📋 {concepto[:100]}")
             
-            # Extraer montos
+
             montos = re.findall(r'\$?\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)', contenido)
             montos_limpios = []
-            for m in montos[:3]:  # Máximo 3 montos por documento
+            for m in montos[:3]: 
                 try:
                     monto_num = float(m.replace(',', ''))
                     montos_limpios.append(monto_num)
@@ -653,14 +626,12 @@ class RAGService:
                 except:
                     respuesta.append(f"  💵 {m}")
             
-            # Extraer ejercicio fiscal
             ejercicio = self._extraer_valor(contenido, 'EJERCICIO') or self._extraer_valor(contenido, 'AÑO')
             if ejercicio:
                 respuesta.append(f"  📅 Ejercicio: {ejercicio}")
             
             respuesta.append("")
         
-        # Análisis financiero
         if todos_montos:
             respuesta.append("**📊 ANÁLISIS FINANCIERO**")
             respuesta.append(f"  • Monto total: ${sum(todos_montos):,.2f}")
@@ -679,14 +650,12 @@ class RAGService:
         personas = []
         puestos = Counter()
         
-        # Palabras a ignorar (headers)
         ignorar = {'NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD', 'PUESTO', 'NUM_EMPLEADO'}
         
         # Procesar documentos
         for doc in docs:
             contenido = str(doc['content'])
             
-            # Si es el formato con pipes
             if ' | ' in contenido:
                 datos = {}
                 for parte in contenido.split(' | '):
@@ -695,14 +664,12 @@ class RAGService:
                         key = key.strip()
                         value = value.strip()
                         
-                        # Limpiar valores que son headers
                         if value not in ignorar and len(value) > 1:
                             datos[key] = value
                             
                             if key.upper() in ['PUESTO', 'CARGO'] and value not in ignorar:
                                 puestos[value] += 1
                 
-                # Solo agregar si tiene al menos un nombre o apellido válido
                 nombre_valido = datos.get('NOMBRE', '') not in ignorar and len(datos.get('NOMBRE', '')) > 1
                 apellido_valido = datos.get('APELLIDO', '') not in ignorar and len(datos.get('APELLIDO', '')) > 1
                 
@@ -710,15 +677,12 @@ class RAGService:
                     personas.append(datos)
         
         if not personas:
-            # Fallback: intentar extraer de otra manera
             return "No se encontró información de personal en formato válido."
         
-        # Mostrar personas en formato tabla
         for i, p in enumerate(personas[:10], 1):
             nombre = p.get('NOMBRE', '')
             apellido = p.get('APELLIDO', '')
             
-            # Validar que no sean headers
             if nombre in ignorar:
                 nombre = ''
             if apellido in ignorar:
@@ -727,7 +691,6 @@ class RAGService:
             nombre_completo = f"{nombre} {apellido}".strip()
             
             if not nombre_completo:
-                # Intentar construir de otras formas
                 otros_campos = [v for k, v in p.items() if k not in ignorar and len(v) > 2]
                 if otros_campos:
                     nombre_completo = otros_campos[0]
@@ -740,7 +703,6 @@ class RAGService:
                 linea += f" — *{puesto}*"
             respuesta.append(linea)
             
-            # Detalles adicionales en una línea
             detalles = []
             if p.get('EDAD') and p['EDAD'] not in ignorar:
                 detalles.append(f"Edad: {p['EDAD']}")
@@ -751,7 +713,6 @@ class RAGService:
                 respuesta.append(f"  ▫️ {' | '.join(detalles)}")
             respuesta.append("")
         
-        # Resumen
         respuesta.append("**📊 RESUMEN**")
         respuesta.append(f"  • Total de personas: {len(personas)}")
         
@@ -778,7 +739,6 @@ class RAGService:
             
             respuesta.append(f"**Contrato {i}**")
             
-            # Número de contrato
             num_contrato = (
                 self._extraer_valor(contenido, 'CONTRATO') or 
                 self._extraer_valor(contenido, 'NÚMERO') or
@@ -787,12 +747,10 @@ class RAGService:
             if num_contrato:
                 respuesta.append(f"  🏷️ Número: {num_contrato}")
             
-            # Proveedor
             proveedor = self._extraer_valor(contenido, 'PROVEEDOR') or self._extraer_valor(contenido, 'CONTRATISTA')
             if proveedor:
                 respuesta.append(f"  🏢 Proveedor: {proveedor}")
             
-            # Monto
             monto = self._extraer_valor(contenido, 'MONTO')
             if monto:
                 respuesta.append(f"  💰 Monto: ${monto}")
@@ -801,7 +759,6 @@ class RAGService:
                 if montos:
                     respuesta.append(f"  💰 Monto: ${montos[0]}")
             
-            # Fechas
             fechas = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', contenido)
             if fechas:
                 fecha_str = f"  📅 "
@@ -811,7 +768,6 @@ class RAGService:
                     fecha_str += f"Fecha: {fechas[0]}"
                 respuesta.append(fecha_str)
             
-            # Estatus
             estatus = self._extraer_valor(contenido, 'ESTATUS')
             if estatus:
                 respuesta.append(f"  📊 Estatus: {estatus}")
@@ -836,17 +792,14 @@ class RAGService:
             
             respuesta.append(f"**{i}. {titulo}**")
             
-            # Buscar artículos citados
             articulos = re.findall(r'(?:Artículo|Art\.?)\s*(\d+)', contenido, re.IGNORECASE)
             if articulos:
                 respuesta.append(f"  📌 Artículos: {', '.join(articulos[:5])}")
             
-            # Buscar capítulos o secciones
             capitulos = re.findall(r'(?:Capítulo|Cap\.?)\s*(\d+|[IVXLCDM]+)', contenido, re.IGNORECASE)
             if capitulos:
                 respuesta.append(f"  📑 Capítulos: {', '.join(capitulos[:3])}")
             
-            # Mostrar primeras líneas relevantes
             lineas = contenido.split('\n')
             texto_relevante = []
             for linea in lineas[:5]:
@@ -874,16 +827,13 @@ class RAGService:
             contenido = str(doc['content'])
             metadata = doc.get('metadata', {})
             
-            # Identificar categoría
             categoria = metadata.get('tipo_documento', 'General')
             categorias[categoria] += 1
             
-            # Extraer números
             numeros = re.findall(r'\d+(?:\.\d+)?', contenido)
             numeros_float = [float(n) for n in numeros if len(n) < 6 and float(n) < 1000000]
             todos_numeros.extend(numeros_float)
         
-        # Resumen estadístico general
         if todos_numeros:
             respuesta.append("**📈 RESUMEN ESTADÍSTICO**")
             respuesta.append(f"  • Total de datos: {len(todos_numeros)}")
@@ -893,14 +843,12 @@ class RAGService:
             respuesta.append(f"  • Máximo: {max(todos_numeros):.2f}")
             respuesta.append("")
         
-        # Distribución por categoría
         if categorias:
             respuesta.append("**📁 DISTRIBUCIÓN POR TIPO**")
             for cat, count in categorias.most_common():
                 respuesta.append(f"  • {cat}: {count} documento(s)")
             respuesta.append("")
         
-        # Lista de reportes
         respuesta.append("**📋 REPORTES DISPONIBLES**")
         for i, doc in enumerate(docs[:5], 1):
             metadata = doc.get('metadata', {})
@@ -925,12 +873,10 @@ class RAGService:
             fuente = metadata.get('source', 'Inventario')
             respuesta.append(f"**{i}. {fuente}**")
             
-            # Contar items en este documento
             if ' | ' in contenido:
                 items = contenido.split(' | ')
                 items_totales += len(items)
                 
-                # Mostrar algunos items
                 for item in items[:5]:
                     item_limpio = item.replace('_x000d_', '').strip()
                     if ':' in item_limpio:
@@ -938,7 +884,6 @@ class RAGService:
                     else:
                         respuesta.append(f"  • {item_limpio[:80]}")
             else:
-                # Si es texto plano, contar líneas con contenido
                 lineas = [l for l in contenido.split('\n') if l.strip() and len(l.strip()) > 10]
                 items_totales += len(lineas)
                 
@@ -947,7 +892,6 @@ class RAGService:
             
             respuesta.append("")
         
-        # Resumen
         respuesta.append("**📊 RESUMEN DE INVENTARIO**")
         respuesta.append(f"  • Total de documentos: {len(docs)}")
         respuesta.append(f"  • Total aproximado de items: {items_totales}")
@@ -958,14 +902,11 @@ class RAGService:
         """Formatea respuesta genérica - VERSIÓN MEJORADA Y LIMPIA"""
         respuesta = []
         
-        # Detectar tipo de consulta
         query_lower = query.lower()
         
-        # Si es consulta de conteo
         if any(word in query_lower for word in ['cuantos', 'cuántos', 'total', 'número', 'cantidad']):
             return self._formatear_respuesta_conteo(docs, query)
         
-        # Si es consulta de lista
         if any(word in query_lower for word in ['lista', 'listado', 'muestra', 'dime']):
             respuesta.append("📋 **RESULTADO DE BÚSQUEDA**")
         else:
@@ -976,7 +917,6 @@ class RAGService:
         respuesta.append(f"**Documentos relevantes:** {len(docs)}")
         respuesta.append("")
         
-        # Agrupar por archivo
         archivos = {}
         for doc in docs:
             fuente = doc['metadata'].get('source', 'Documento')
@@ -984,7 +924,6 @@ class RAGService:
                 archivos[fuente] = []
             archivos[fuente].append(doc)
         
-        # Mostrar información agrupada
         for fuente, docs_fuente in archivos.items():
             respuesta.append(f"**📁 {fuente}**")
             
@@ -992,7 +931,6 @@ class RAGService:
                 contenido = doc['content']
                 metadata = doc.get('metadata', {})
                 
-                # Si es un registro de persona, formatear bonito
                 if 'NOMBRE:' in contenido and 'APELLIDO:' in contenido:
                     nombre = self._extraer_valor(contenido, 'NOMBRE')
                     apellido = self._extraer_valor(contenido, 'APELLIDO')
@@ -1003,7 +941,6 @@ class RAGService:
                         linea += f" — *{puesto}*"
                     respuesta.append(linea)
                 else:
-                    # Contenido genérico - limpiar y mostrar
                     preview = contenido.replace(' | ', ' • ').replace('_x000d_', '')
                     preview = preview.replace('NOMBRE:', '**Nombre:**').replace('APELLIDO:', '**Apellido:**')
                     preview = preview[:100] + "..." if len(preview) > 100 else preview
@@ -1027,28 +964,21 @@ class RAGService:
         respuesta.append("🔢 **RESULTADO DE CONTEO**")
         respuesta.append("")
         
-        # Detectar qué estamos contando
         query_lower = query.lower()
         
-        # Contar personas (VERSIÓN MEJORADA CON LIMPIEZA)
         if any(word in query_lower for word in ['nombre', 'persona', 'empleado', 'trabajador']):
             personas = set()
             
             for doc in docs:
                 contenido = doc['content']
                 
-                # LIMPIEZA: Eliminar texto repetido y basura
                 if 'NOMBRE:' in contenido:
-                    # Extraer solo los nombres reales
                     partes = contenido.split(' | ')
                     for parte in partes:
                         if parte.startswith('NOMBRE:'):
                             nombre = parte.replace('NOMBRE:', '').strip()
-                            # Ignorar si es un encabezado o texto repetido
                             if nombre and nombre not in ['NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD']:
-                                # Limpiar nombres que parecen listas
                                 if ',' in nombre:
-                                    # Si tiene comas, tomar solo el primer nombre real
                                     nombres_lista = [n.strip() for n in nombre.split(',') if n.strip() and len(n.strip()) > 2]
                                     for n in nombres_lista:
                                         if n not in ['NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD']:
@@ -1058,21 +988,15 @@ class RAGService:
                         
                         elif parte.startswith('APELLIDO:'):
                             apellido = parte.replace('APELLIDO:', '').strip()
-                            # Similar limpieza para apellidos
                             if apellido and apellido not in ['NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD']:
                                 if ',' in apellido:
                                     apellidos_lista = [a.strip() for a in apellido.split(',') if a.strip() and len(a.strip()) > 2]
                                     for a in apellidos_lista:
                                         if a not in ['NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD']:
-                                            # Buscamos si ya tenemos este apellido asociado a algún nombre
                                             pass
                                 else:
-                                    # No podemos agregar solo apellidos sin nombre
                                     pass
-            
-            # Si encontramos nombres, mostrarlos
             if personas:
-                # Filtrar nombres válidos (más de 2 caracteres y no son headers)
                 personas_validas = {p for p in personas if len(p) > 2 and p not in ['NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD']}
                 
                 respuesta.append(f"**Total de personas:** {len(personas_validas)}")
@@ -1083,7 +1007,6 @@ class RAGService:
                     for persona in sorted(personas_validas):
                         respuesta.append(f"  • {persona}")
             else:
-                # Fallback: intentar extraer de otra manera
                 nombres_encontrados = self._extraer_nombres_de_documentos(docs)
                 if nombres_encontrados:
                     respuesta.append(f"**Total de personas:** {len(nombres_encontrados)}")
@@ -1094,11 +1017,9 @@ class RAGService:
                 else:
                     respuesta.append(f"**Total de registros:** {len(docs)}")
         
-        # Contar documentos
         elif 'documento' in query_lower or 'archivo' in query_lower:
             respuesta.append(f"**Total de documentos:** {len(docs)}")
             
-            # Agrupar por tipo
             tipos = Counter()
             for doc in docs:
                 tipo = doc['metadata'].get('format', 'Desconocido')
@@ -1110,7 +1031,6 @@ class RAGService:
                 for tipo, count in tipos.items():
                     respuesta.append(f"  • {tipo}: {count}")
         
-        # Conteo genérico
         else:
             respuesta.append(f"**Total de registros encontrados:** {len(docs)}")
         
@@ -1120,16 +1040,13 @@ class RAGService:
         """Extrae nombres reales de los documentos"""
         nombres = set()
         
-        # Lista de palabras a ignorar (headers, etc.)
         ignorar = {'NOMBRE', 'APELLIDO', 'EDAD', 'CARGO', 'NACIONALIDAD', 'PUESTO', 'NUM_EMPLEADO'}
         
         for doc in docs:
             contenido = doc['content']
             
-            # Buscar patrones de nombre/apellido
             lineas = contenido.split('\n')
             for linea in lineas:
-                # Buscar líneas con formato "NOMBRE: X | APELLIDO: Y"
                 if 'NOMBRE:' in linea and 'APELLIDO:' in linea:
                     partes = linea.split(' | ')
                     nombre = ''
@@ -1141,7 +1058,6 @@ class RAGService:
                         elif parte.startswith('APELLIDO:'):
                             apellido = parte.replace('APELLIDO:', '').strip()
                     
-                    # Validar que sean nombres reales
                     if nombre and nombre not in ignorar and len(nombre) > 2:
                         if apellido and apellido not in ignorar and len(apellido) > 2:
                             nombres.add(f"{nombre} {apellido}".strip())
@@ -1169,7 +1085,6 @@ class RAGService:
             if persona['nombre'] or persona['apellido']:
                 personas.append(persona)
         
-        # Mostrar en formato tabla limpia
         for i, p in enumerate(personas, 1):
             nombre_completo = f"{p['nombre']} {p['apellido']}".strip()
             linea = f"**{i}. {nombre_completo}**"
@@ -1197,7 +1112,6 @@ class RAGService:
         """
         start_time = time.time()
         
-        # ===== 1. VERIFICAR CACHE =====
         if self.cache_manager:
             cached_response = self.cache_manager.obtener(query, user_id)
             if cached_response:
@@ -1207,11 +1121,10 @@ class RAGService:
                 logger.info(f"⚡ Respuesta desde cache en {cached_response['tiempo_respuesta_ms']}ms")
                 return cached_response
         
-        # ===== 2. RECUPERACIÓN VECTORIAL MEJORADA =====
         chat = self._get_user_session(user_id)
         
         query_embedding = self.embedding_service.generate_embedding(query, is_query=True)
-        results = self.vector_store.search_similar(query_embedding, limit=30)  # Aumentar límite
+        results = self.vector_store.search_similar(query_embedding, limit=30) 
 
         logger.info(f"Total de resultados: {len(results)}")
         
@@ -1231,15 +1144,12 @@ class RAGService:
             respuesta_base['from_cache'] = False
             return respuesta_base
 
-        # ===== 3. CLASIFICAR Y PRIORIZAR RESULTADOS =====
         query_lower = query.lower()
         
-        # Separar por tipo de contenido
         chunks_personal = []
         chunks_resumen = []
         chunks_otros = []
         
-        # Set para eliminar duplicados (por contenido)
         contenidos_vistos = set()
         resultados_unicos = []
         
@@ -1249,13 +1159,12 @@ class RAGService:
             tipo_contenido = metadata.get('tipo_contenido', '')
             source = metadata.get('source', '')
             
-            # Crear clave única para evitar duplicados
-            contenido_key = contenido[:200]  # Usar primeros 200 chars como clave
+
+            contenido_key = contenido[:200]
             if contenido_key in contenidos_vistos:
                 continue
             contenidos_vistos.add(contenido_key)
             
-            # Clasificar
             if tipo_contenido in ['registro_personal', 'resumen_personal'] or 'NOMBRE:' in contenido:
                 chunks_personal.append(r)
             elif 'RESUMEN' in str(contenido).upper() and 'OBRAS' in str(contenido).upper():
@@ -1263,28 +1172,22 @@ class RAGService:
             else:
                 chunks_otros.append(r)
         
-        # Priorizar según el tipo de consulta
         if any(word in query_lower for word in ['persona', 'quien', 'empleado', 'residente', 'supervisor']):
-            # Consultas de personal: priorizar chunks de personal
             relevant_docs = (chunks_personal[:8] + chunks_otros[:2])[:10]
             logger.info(f"Priorizando personal: {len(chunks_personal)} chunks encontrados")
         elif any(word in query_lower for word in ['cuantos', 'cuántos', 'total']):
-            # Consultas de conteo: incluir resúmenes
             relevant_docs = (chunks_personal[:5] + chunks_resumen[:3] + chunks_otros[:2])[:10]
         else:
-            # Otras consultas: balanceado
             relevant_docs = (chunks_personal[:4] + chunks_resumen[:3] + chunks_otros[:3])[:10]
         
         if not relevant_docs:
             relevant_docs = results[:5]
         
-        # Logging
         logger.info(f"Chunks seleccionados: Personal={len([d for d in relevant_docs if 'NOMBRE:' in d['content']])}, " +
                     f"Resumen={len([d for d in relevant_docs if 'RESUMEN' in d['content']])}")
         
         context = build_context(relevant_docs)
         
-        # Detectar tipos de documentos para logging
         tipos_docs = list(set([r['metadata'].get('tipo_documento', 'General') for r in relevant_docs]))
         
         prompt = f"""{SYSTEM_PROMPT}
@@ -1303,7 +1206,6 @@ class RAGService:
     RESPUESTA:
     """
         
-        # ===== 4. INTENTAR CON GEMINI =====
         try:
             response = self.safe_execute(chat.send_message, prompt)
             
@@ -1320,7 +1222,6 @@ class RAGService:
         except Exception as e:
             logger.error(f"Error con Gemini, usando fallback: {e}")
             
-            # ===== 5. FALLBACK ESPECIALIZADO =====
             if any(word in query_lower for word in ['residente', 'residentes']):
                 fallback_answer = self._formatear_respuesta_por_cargo(relevant_docs, query)
             else:
@@ -1337,7 +1238,6 @@ class RAGService:
                 "from_cache": False
             }
         
-        # ===== 6. GUARDAR EN CACHE =====
         if self.cache_manager:
             self.cache_manager.guardar(query, respuesta_final, user_id)
             logger.info(f"💾 Respuesta guardada en cache para: {query[:50]}...")
