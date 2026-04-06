@@ -150,7 +150,30 @@ async def delete_conversation(conversation_id: str, user_id: str = Depends(get_c
 
 # --- Utilidades ---
 
-@router.delete("/api/admin/clear-db")
-async def clear_db():
+@router.delete("/api/admin/clear-vectores")
+async def clear_vectores():
     vector_store.collection.delete_many({})
     return {"status": "success", "message": "Vectores eliminados"}
+@router.delete("/api/admin/clear-db")
+async def clear_db():
+    try:
+        collections_to_clear = [
+            "users",
+            "respuestas_cache",
+            "conversations"
+        ]
+        results = {}
+        for collection_name in collections_to_clear:
+            collection = vector_store.db[collection_name]
+            if collection_name in vector_store.db.list_collection_names():
+                deleted = collection.delete_many({})
+                results[collection_name] = deleted.deleted_count
+            else:
+                results[collection_name] = "No existe"
+        return{
+            "status": "success",
+            "message": "Base de datos limpiada correctamente"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

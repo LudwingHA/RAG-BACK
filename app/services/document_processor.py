@@ -231,705 +231,704 @@ class DocumentProcessor:
         if puntajes:
             return max(puntajes, key=puntajes.get)
         return 'GENERAL'
-    
+
+    # ==================== MÉTODOS PRINCIPALES PARA EXCEL ====================
+
     def process_excel(self, file_path: str) -> List[Dict[str, Any]]:
         """
-        Procesador DEFINITIVO para Excel SICT.
-        Limpia y estructura datos de:
-        - Personal/RH
-        - Obras e infraestructura
-        - Baches y mantenimiento
-        - Presupuestos
-        - Contratos
-        - Inventarios
-        - Normativas
+        Procesa Excel con detección inteligente multi-tipo y tolerancia a errores humanos
+        Maneja: Personal, Obras, Presupuestos, Inventario, Baches, Contratos, Incidencias
         """
         all_chunks = []
         start_time = time.time()
         
         try:
             filename = os.path.basename(file_path)
-            logger.info(f"📊 Procesando Excel SICT: {filename}")
+            logger.info(f"📊 Procesando Excel multi-tipo: {filename}")
             
-            tipo_documento = self._detectar_tipo_documento_sict(filename)
-            logger.info(f"📋 Tipo detectado: {tipo_documento}")
-            
-            excel_file = self._leer_excel_robusto(file_path)
-            if not excel_file:
-                raise Exception("No se pudo leer el Excel")
+            # Leer todas las hojas
+            excel_file = pd.ExcelFile(file_path)
             
             for sheet_name in excel_file.sheet_names:
-                try:
-                    logger.info(f"  Procesando hoja: {sheet_name}")
-                    
-                    df = self._leer_hoja_inteligente(excel_file, sheet_name)
-                    if df is None or df.empty:
-                        continue
-                    
-                    df = self._limpiar_dataframe(df)
-                    
-                    headers, header_row_idx = self._detectar_encabezados(df)
-                    
-                    columnas_por_tipo = self._clasificar_columnas(headers, df, header_row_idx)
-                    
-                    chunks_hoja = self._procesar_por_tipo(
-                        df, headers, header_row_idx, filename, sheet_name,
-                        tipo_documento, columnas_por_tipo
-                    )
-                    
-                    all_chunks.extend(chunks_hoja)
-                    
-                    resumen = self._crear_resumen_tipo(
-                        chunks_hoja, filename, sheet_name, tipo_documento
-                    )
-                    if resumen:
-                        all_chunks.append(resumen)
-                    
-                except Exception as e:
-                    logger.error(f"Error en hoja {sheet_name}: {e}")
+                logger.info(f"  📄 Hoja: {sheet_name}")
+                
+                # Intentar leer con múltiples estrategias (tolerancia a errores)
+                df = self._leer_excel_tolerante(file_path, sheet_name)
+                
+                if df is None or df.empty:
+                    logger.warning(f"  ⚠️ Hoja vacía o no se pudo leer: {sheet_name}")
                     continue
-            
-            all_chunks.append(self._crear_metadatos(filename, tipo_documento, len(all_chunks)))
+                
+                # Detectar tipo de contenido de la hoja
+                tipo_hoja = self._detectar_tipo_hoja(df, sheet_name)
+                logger.info(f"    📌 Tipo detectado: {tipo_hoja}")
+                
+                # Limpieza inteligente
+                df = self._limpieza_inteligente(df)
+                
+                if df.empty:
+                    continue
+                
+                # Procesar según tipo detectado
+                if tipo_hoja == 'PERSONAL':
+                    chunks = self._procesar_personal(df, filename, sheet_name)
+                elif tipo_hoja == 'OBRAS':
+                    chunks = self._procesar_obras(df, filename, sheet_name)
+                elif tipo_hoja == 'PRESUPUESTO':
+                    chunks = self._procesar_presupuesto(df, filename, sheet_name)
+                elif tipo_hoja == 'INVENTARIO':
+                    chunks = self._procesar_inventario(df, filename, sheet_name)
+                elif tipo_hoja == 'INCIDENCIAS':
+                    chunks = self._procesar_incidencias(df, filename, sheet_name)
+                elif tipo_hoja == 'CONTRATOS':
+                    chunks = self._procesar_contratos(df, filename, sheet_name)
+                else:
+                    chunks = self._procesar_generico(df, filename, sheet_name)
+                
+                all_chunks.extend(chunks)
+                logger.info(f"    ✅ {len(chunks)} chunks generados")
             
             elapsed = time.time() - start_time
-            logger.info(f"Excel procesado: {len(all_chunks)} chunks en {elapsed:.2f}s")
+            logger.info(f"✅ Excel procesado: {filename} - {len(all_chunks)} chunks en {elapsed:.2f}s")
             
         except Exception as e:
-            logger.exception(f"[Error crítico]: {e}")
+            logger.exception(f"Error procesando Excel {file_path}: {e}")
             all_chunks.append(self._crear_chunk_error(filename, str(e)))
         
         return all_chunks
 
-    def _leer_excel_robusto(self, file_path: str):
-        """Intenta leer Excel con diferentes motores"""
-        for engine in ['openpyxl', 'xlrd']:
-            try:
-                return pd.ExcelFile(file_path, engine=engine)
-            except:
-                continue
-        return None
+    # ==================== MÉTODOS AUXILIARES PARA EXCEL ====================
 
-    def _leer_hoja_inteligente(self, excel_file, sheet_name: str):
-        """Múltiples estrategias de lectura para una hoja"""
+    def _leer_excel_tolerante(self, file_path: str, sheet_name: str) -> Optional[pd.DataFrame]:
+        """Múltiples estrategias de lectura tolerantes a errores"""
         estrategias = [
-            lambda: pd.read_excel(excel_file, sheet_name=sheet_name, header=0),
-            lambda: pd.read_excel(excel_file, sheet_name=sheet_name, header=None),
-            lambda: pd.read_excel(excel_file, sheet_name=sheet_name, skiprows=range(3), header=0),
-            lambda: pd.read_excel(excel_file, sheet_name=sheet_name, dtype=str),
-            lambda: pd.read_excel(excel_file, sheet_name=sheet_name, encoding='latin1')
+            lambda: pd.read_excel(file_path, sheet_name=sheet_name, header=0),
+            lambda: pd.read_excel(file_path, sheet_name=sheet_name, header=None),
+            lambda: pd.read_excel(file_path, sheet_name=sheet_name, skiprows=1, header=0),
+            lambda: pd.read_excel(file_path, sheet_name=sheet_name, dtype=str),
+            lambda: pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl'),
         ]
         
-        for estrategia in estrategias:
+        for i, estrategia in enumerate(estrategias):
             try:
                 df = estrategia()
                 if df is not None and not df.empty:
                     return df
-            except:
+            except Exception as e:
+                logger.debug(f"Estrategia {i+1} falló: {e}")
                 continue
+        
         return None
 
-    def _limpiar_dataframe(self, df):
-        """Limpieza general del DataFrame"""
-        df = df.dropna(how='all', axis=0).dropna(how='all', axis=1)
+    def _detectar_tipo_hoja(self, df: pd.DataFrame, sheet_name: str) -> str:
+        """Detecta el tipo de contenido basado en columnas y contenido"""
+        cols = [str(col).upper().strip() for col in df.columns]
+        cols_str = ' '.join(cols)
+        sheet_lower = sheet_name.lower()
         
-        mask = df.apply(lambda row: row.astype(str).str.contains('^-+$|^=+$|^_+$').any(), axis=1)
-        df = df[~mask]
+        sample_text = ' '.join([str(v).upper() for v in df.iloc[0:5].values.flatten() if pd.notna(v)])
         
-        return df.reset_index(drop=True)
-
-    def _detectar_encabezados(self, df):
-        """Detecta la fila de encabezados"""
-        for idx in range(min(10, len(df))):
-            row = df.iloc[idx]
-            row_text = ' '.join([str(x).upper() for x in row if pd.notna(x)])
-            
-            matches = sum(1 for palabra in self.ignorar_global if palabra in row_text)
-            
-            if matches >= 2:
-                headers = [str(col).strip() if pd.notna(col) else f'COL_{j+1}' 
-                          for j, col in enumerate(row)]
-                logger.info(f"  Encabezados detectados en fila {idx+1}")
-                return headers, idx
-        
-        return [f'COL_{j+1}' for j in range(len(df.columns))], -1
-
-    def _clasificar_columnas(self, headers, df, header_row_idx):
-        """Clasifica columnas por tipo de contenido"""
-        tipos = {
-            'nombre': [],
-            'fecha': [],
-            'monto': [],
-            'ubicacion': [],
-            'descripcion': [],
-            'cantidad': [],
-            'otros': []
+        patrones = {
+            'PERSONAL': {
+                'columnas': ['NOMBRE', 'APELLIDO', 'EMPLEADO', 'RFC', 'CURP', 'PUESTO', 'CARGO'],
+                'hoja': ['personal', 'rh', 'empleados', 'trabajadores'],
+                'contenido': ['NOMBRE', 'APELLIDO', 'RFC', 'EMPLEADO']
+            },
+            'OBRAS': {
+                'columnas': ['OBRA', 'PROYECTO', 'TIPO', 'UBICACIÓN', 'UBICACION', 'MONTO', 'AVANCE', 'RESPONSABLE'],
+                'hoja': ['obra', 'proyecto', 'infraestructura', 'construcción'],
+                'contenido': ['OBRA', 'PROYECTO', 'CONSTRUCCIÓN', 'INFRAESTRUCTURA']
+            },
+            'PRESUPUESTO': {
+                'columnas': ['PRESUPUESTO', 'MONTO', 'COSTO', 'PARTIDA', 'CONCEPTO', 'EJERCICIO'],
+                'hoja': ['presupuesto', 'finanzas', 'costos', 'partidas'],
+                'contenido': ['PRESUPUESTO', 'MONTO', 'COSTO', 'PARTIDA']
+            },
+            'INVENTARIO': {
+                'columnas': ['INVENTARIO', 'BIEN', 'ACTIVO', 'CÓDIGO', 'DESCRIPCIÓN', 'CANTIDAD'],
+                'hoja': ['inventario', 'activos', 'bienes', 'equipo', 'maquinaria'],
+                'contenido': ['INVENTARIO', 'BIEN', 'ACTIVO', 'CÓDIGO']
+            },
+            'INCIDENCIAS': {
+                'columnas': ['INCIDENCIA', 'BACHE', 'REPORTE', 'GRAVEDAD', 'ESTADO', 'FECHA_REPORTE'],
+                'hoja': ['incidencia', 'bache', 'reporte', 'queja', 'falla'],
+                'contenido': ['INCIDENCIA', 'BACHE', 'REPORTE', 'GRAVEDAD', 'CRÍTICA']
+            },
+            'CONTRATOS': {
+                'columnas': ['CONTRATO', 'LICITACIÓN', 'PROVEEDOR', 'CONTRATISTA', 'FECHA_INICIO', 'FECHA_FIN'],
+                'hoja': ['contrato', 'licitación', 'proveedor', 'adjudicación'],
+                'contenido': ['CONTRATO', 'LICITACIÓN', 'PROVEEDOR']
+            }
         }
         
-        for j, header in enumerate(headers):
-            header_upper = header.upper()
-            
-            if any(p in header_upper for p in ['NOMBRE', 'APELLIDO', 'EMPLEADO']):
-                tipos['nombre'].append(j)
-            elif any(p in header_upper for p in ['FECHA', 'PERIODO', 'EJERCICIO']):
-                tipos['fecha'].append(j)
-            elif any(p in header_upper for p in ['MONTO', 'PRECIO', 'COSTO', 'IMPORTE']):
-                tipos['monto'].append(j)
-            elif any(p in header_upper for p in ['UBICACIÓN', 'DIRECCIÓN', 'DOMICILIO']):
-                tipos['ubicacion'].append(j)
-            elif any(p in header_upper for p in ['DESCRIPCIÓN', 'CONCEPTO', 'OBSERVACIONES']):
-                tipos['descripcion'].append(j)
-            elif any(p in header_upper for p in ['CANTIDAD', 'NÚMERO', 'TOTAL']):
-                tipos['cantidad'].append(j)
-            else:
-                tipos['otros'].append(j)
+        max_score = 0
+        detected_type = 'GENERAL'
         
-        return tipos
+        for tipo, patron in patrones.items():
+            score = 0
+            
+            for col_patron in patron['columnas']:
+                if col_patron in cols_str:
+                    score += 3
+            
+            for hoja_patron in patron['hoja']:
+                if hoja_patron in sheet_lower:
+                    score += 5
+            
+            for cont_patron in patron['contenido']:
+                if cont_patron in sample_text:
+                    score += 2
+            
+            if score > max_score:
+                max_score = score
+                detected_type = tipo
+        
+        if max_score < 3:
+            numeric_cols = df.select_dtypes(include=['number']).columns
+            if len(numeric_cols) >= 2 and df[numeric_cols].notna().any().any():
+                return 'PRESUPUESTO'
+            elif len(df.columns) >= 3 and len(df) > 5:
+                return 'GENERAL_TABULAR'
+        
+        return detected_type
 
-    def _detectar_tipo_documento_sict(self, filename: str) -> str:
-        """Detecta tipo de documento por nombre de archivo"""
-        filename_upper = filename.upper()
+    def _limpieza_inteligente(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Limpieza tolerante a errores humanos"""
+        df = df.dropna(how='all').dropna(axis=1, how='all')
         
-        for tipo, patrones in self.patrones_tipos.items():
-            if any(patron.upper() in filename_upper for patron in patrones):
-                return tipo
+        threshold = int(len(df.columns) * 0.8)
+        df = df.dropna(thresh=threshold, axis=0)
         
-        return 'GENERAL'
-
-    def _procesar_por_tipo(self, df, headers, header_row_idx, filename, sheet_name, 
-                          tipo_documento, columnas_por_tipo):
-        """
-        Procesa según el tipo de documento detectado
-        """
-        chunks = []
-        data_start = header_row_idx + 1 if header_row_idx >= 0 else 0
+        df.columns = [
+            str(col).strip().upper().replace(' ', '_').replace('Á', 'A').replace('É', 'E').replace('Í', 'I').replace('Ó', 'O').replace('Ú', 'U')
+            if not str(col).startswith('Unnamed') else f'COL_{i}'
+            for i, col in enumerate(df.columns)
+        ]
         
-        registros_validos = []
+        df = df.replace(['N/A', 'NA', 'NULL', 'null', 'None', ''], pd.NA)
         
-        for idx in range(data_start, len(df)):
-            row = df.iloc[idx]
-            
-
-            if row.isna().all():
-                continue
-            
-
-            if tipo_documento == 'PERSONAL':
-                chunk = self._procesar_fila_personal(row, headers, idx, filename, sheet_name)
-            elif tipo_documento == 'OBRAS':
-                chunk = self._procesar_fila_obras(row, headers, idx, filename, sheet_name)
-            elif tipo_documento == 'BACHES':
-                chunk = self._procesar_fila_baches(row, headers, idx, filename, sheet_name)
-            elif tipo_documento == 'PRESUPUESTO':
-                chunk = self._procesar_fila_presupuesto(row, headers, idx, filename, sheet_name)
-            elif tipo_documento == 'CONTRATOS':
-                chunk = self._procesar_fila_contratos(row, headers, idx, filename, sheet_name)
-            elif tipo_documento == 'INVENTARIO':
-                chunk = self._procesar_fila_inventario(row, headers, idx, filename, sheet_name)
-            else:
-                chunk = self._procesar_fila_generica(row, headers, idx, filename, sheet_name)
-            
-            if chunk:
-                chunks.append(chunk)
-                registros_validos.append(chunk)
-        
-        logger.info(f"  {len(chunks)} registros válidos procesados")
-        return chunks
-
-    def _procesar_fila_personal(self, row, headers, idx, filename, sheet_name):
-        """Procesa fila de personal/RH"""
-        registro = []
-        nombre = ""
-        apellido = ""
-        
-        for j, header in enumerate(headers):
-            if j >= len(row):
-                continue
-            
-            valor = self._limpiar_valor(row.iloc[j], header)
-            if not valor:
-                continue
-            
-            header_upper = header.upper()
-            
-            # Capturar nombre y apellido para metadata
-            if 'NOMBRE' in header_upper:
-                nombre = valor
-            elif 'APELLIDO' in header_upper:
-                apellido = valor
-            
-            registro.append(f"{header}: {valor}")
-        
-        if registro and (nombre or apellido):
-            return {
-                "content": " | ".join(registro),
-                "metadata": {
-                    "source": filename,
-                    "sheet": sheet_name,
-                    "row": idx + 2,
-                    "format": "Excel",
-                    "tipo_documento": "PERSONAL",
-                    "tipo_contenido": "registro_personal",
-                    "nombre": nombre,
-                    "apellido": apellido
-                }
-            }
-        return None
-
-    def _procesar_fila_obras(self, row, headers, idx, filename, sheet_name):
-        """Procesa fila de obras/infraestructura"""
-        registro = []
-        ubicacion = ""
-        monto = ""
-        
-        for j, header in enumerate(headers):
-            if j >= len(row):
-                continue
-            
-            valor = self._limpiar_valor(row.iloc[j], header)
-            if not valor:
-                continue
-            
-            header_upper = header.upper()
-            
-            if 'UBICACIÓN' in header_upper or 'DIRECCIÓN' in header_upper:
-                ubicacion = valor
-            elif 'MONTO' in header_upper or 'PRESUPUESTO' in header_upper:
-                monto = valor
-            
-            registro.append(f"{header}: {valor}")
-        
-        if registro:
-            return {
-                "content": " | ".join(registro),
-                "metadata": {
-                    "source": filename,
-                    "sheet": sheet_name,
-                    "row": idx + 2,
-                    "format": "Excel",
-                    "tipo_documento": "OBRAS",
-                    "tipo_contenido": "registro_obra",
-                    "ubicacion": ubicacion,
-                    "monto": monto
-                }
-            }
-        return None
-
-    def _procesar_fila_baches(self, row, headers, idx, filename, sheet_name):
-        """Procesa fila de baches/mantenimiento"""
-        registro = []
-        ubicacion = ""
-        severidad = ""
-        
-        for j, header in enumerate(headers):
-            if j >= len(row):
-                continue
-            
-            valor = self._limpiar_valor(row.iloc[j], header)
-            if not valor:
-                continue
-            
-            header_upper = header.upper()
-            
-            if 'UBICACIÓN' in header_upper or 'DIRECCIÓN' in header_upper:
-                ubicacion = valor
-            elif 'SEVERIDAD' in header_upper or 'GRAVEDAD' in header_upper:
-                severidad = valor
-            
-            registro.append(f"{header}: {valor}")
-        
-        if registro:
-            return {
-                "content": " | ".join(registro),
-                "metadata": {
-                    "source": filename,
-                    "sheet": sheet_name,
-                    "row": idx + 2,
-                    "format": "Excel",
-                    "tipo_documento": "BACHES",
-                    "tipo_contenido": "reporte_bache",
-                    "ubicacion": ubicacion,
-                    "severidad": severidad
-                }
-            }
-        return None
-
-    def _procesar_fila_presupuesto(self, row, headers, idx, filename, sheet_name):
-        """Procesa fila de presupuesto/finanzas"""
-        registro = []
-        monto_total = 0
-        concepto = ""
-        
-        for j, header in enumerate(headers):
-            if j >= len(row):
-                continue
-            
-            valor = self._limpiar_valor(row.iloc[j], header)
-            if not valor:
-                continue
-            
-            header_upper = header.upper()
-            
-            if 'CONCEPTO' in header_upper or 'DESCRIPCIÓN' in header_upper:
-                concepto = valor
-            elif 'MONTO' in header_upper or 'IMPORTE' in header_upper or 'TOTAL' in header_upper:
+        for col in df.columns:
+            if df[col].dtype == 'object':
                 try:
-                    monto_total = float(re.sub(r'[^\d.-]', '', valor))
+                    cleaned = df[col].astype(str).str.replace(r'[^\d.-]', '', regex=True)
+                    df[col] = pd.to_numeric(cleaned, errors='ignore')
                 except:
                     pass
-            
-            registro.append(f"{header}: {valor}")
         
-        if registro:
-            return {
-                "content": " | ".join(registro),
+        return df
+
+    def _encontrar_columna(self, df: pd.DataFrame, posibles: List[str]) -> Optional[str]:
+        """Encuentra la columna que coincide con posibles nombres (tolerante a errores)"""
+        cols_upper = [str(col).upper().strip() for col in df.columns]
+        
+        for posible in posibles:
+            posible_upper = posible.upper()
+            
+            if posible_upper in cols_upper:
+                idx = cols_upper.index(posible_upper)
+                return df.columns[idx]
+            
+            for i, col in enumerate(cols_upper):
+                if posible_upper in col or col in posible_upper:
+                    return df.columns[i]
+        
+        return None
+
+    # ==================== PROCESAMIENTO POR TIPO ====================
+
+    def _procesar_personal(self, df: pd.DataFrame, filename: str, sheet_name: str) -> List[Dict]:
+        """Procesa datos de personal/RH"""
+        chunks = []
+        registros = df.to_dict(orient='records')
+        
+        col_mapping = {
+            'nombre': ['NOMBRE', 'NOM', 'NOMBRES', 'EMPLEADO', 'TRABAJADOR'],
+            'apellido': ['APELLIDO', 'APELLIDOS', 'AP', 'LAST_NAME'],
+            'puesto': ['PUESTO', 'CARGO', 'POSICION', 'ROL', 'PUESTO_ACTUAL'],
+            'rfc': ['RFC', 'REGISTRO_FEDERAL'],
+            'curp': ['CURP'],
+            'departamento': ['DEPARTAMENTO', 'AREA', 'DIRECCION', 'UNIDAD'],
+            'fecha_ingreso': ['FECHA_INGRESO', 'INGRESO', 'FECHA_CONTRATACION', 'ANTIGÜEDAD']
+        }
+        
+        columnas = {tipo: self._encontrar_columna(df, posibles) for tipo, posibles in col_mapping.items()}
+        
+        for idx, row in enumerate(registros):
+            texto_parts = []
+            metadata = {
+                "source": filename,
+                "sheet": sheet_name,
+                "row": idx + 2,
+                "format": "Excel",
+                "tipo_documento": "PERSONAL",
+                "tipo_contenido": "registro_personal"
+            }
+            
+            for tipo, col in columnas.items():
+                if col and pd.notna(row.get(col)):
+                    valor = str(row[col]).strip()
+                    if len(valor) > 1 and valor.upper() not in self.ignorar_global:
+                        texto_parts.append(f"{tipo}: {valor}")
+                        metadata[tipo] = valor
+            
+            if texto_parts:
+                chunks.append({
+                    "content": " | ".join(texto_parts),
+                    "metadata": metadata
+                })
+        
+        if len(registros) > 5:
+            resumen = self._resumen_personal(registros, columnas, filename, sheet_name)
+            if resumen:
+                chunks.append(resumen)
+        
+        return chunks
+
+    def _procesar_obras(self, df: pd.DataFrame, filename: str, sheet_name: str) -> List[Dict]:
+        """Procesa datos de obras/infraestructura"""
+        chunks = []
+        registros = df.to_dict(orient='records')
+        
+        col_mapping = {
+            'nombre': ['OBRA', 'PROYECTO', 'NOMBRE_OBRA', 'PROYECTO_OBRA', 'DESCRIPCION'],
+            'tipo': ['TIPO', 'TIPO_OBRA', 'CATEGORIA', 'CLASIFICACION'],
+            'ubicacion': ['UBICACION', 'UBICACIÓN', 'DIRECCION', 'DOMICILIO', 'MUNICIPIO', 'LOCALIDAD'],
+            'monto': ['MONTO', 'PRESUPUESTO', 'COSTO', 'INVERSION', 'PRESUPUESTO_ASIGNADO'],
+            'avance': ['AVANCE', 'PROGRESO', '%_AVANCE', 'PORCENTAJE'],
+            'responsable': ['RESPONSABLE', 'INGENIERO', 'CONTRATISTA', 'ENCARGADO', 'SUPERVISOR'],
+            'fecha_inicio': ['FECHA_INICIO', 'INICIO', 'FECHA_INICIO_OBRA'],
+            'fecha_fin': ['FECHA_FIN', 'FIN', 'FECHA_TERMINO', 'CONCLUSION'],
+            'estado': ['ESTADO', 'ESTATUS', 'SITUACION', 'CONDICION']
+        }
+        
+        columnas = {tipo: self._encontrar_columna(df, posibles) for tipo, posibles in col_mapping.items()}
+        
+        for idx, row in enumerate(registros):
+            texto_parts = []
+            metadata = {
+                "source": filename,
+                "sheet": sheet_name,
+                "row": idx + 2,
+                "format": "Excel",
+                "tipo_documento": "OBRAS",
+                "tipo_contenido": "registro_obra"
+            }
+            
+            for tipo, col in columnas.items():
+                if col and pd.notna(row.get(col)):
+                    valor = str(row[col]).strip()
+                    if len(valor) > 1:
+                        texto_parts.append(f"{tipo}: {valor}")
+                        metadata[tipo] = valor
+                        
+                        if tipo == 'monto':
+                            try:
+                                metadata['monto_numerico'] = float(re.sub(r'[^\d.-]', '', valor))
+                            except:
+                                pass
+                        elif tipo == 'avance':
+                            try:
+                                metadata['avance_numerico'] = float(re.sub(r'[^\d.-]', '', valor))
+                            except:
+                                pass
+            
+            if texto_parts:
+                chunks.append({
+                    "content": " | ".join(texto_parts),
+                    "metadata": metadata
+                })
+        
+        chunks.extend(self._agregaciones_obras(registros, columnas, filename, sheet_name))
+        
+        return chunks
+
+    def _procesar_presupuesto(self, df: pd.DataFrame, filename: str, sheet_name: str) -> List[Dict]:
+        """Procesa datos de presupuesto/finanzas"""
+        chunks = []
+        registros = df.to_dict(orient='records')
+        
+        col_mapping = {
+            'concepto': ['CONCEPTO', 'DESCRIPCION', 'PARTIDA', 'CONCEPTO_PRESUPUESTAL', 'DETALLE'],
+            'monto': ['MONTO', 'IMPORTE', 'CANTIDAD', 'MONTO_PRESUPUESTADO', 'COSTO'],
+            'partida': ['PARTIDA', 'CLAVE', 'CODIGO', 'NUMERO_PARTIDA'],
+            'ejercicio': ['EJERCICIO', 'AÑO', 'FECHA', 'PERIODO'],
+            'fuente': ['FUENTE', 'ORIGEN', 'PROCEDENCIA']
+        }
+        
+        columnas = {tipo: self._encontrar_columna(df, posibles) for tipo, posibles in col_mapping.items()}
+        
+        total_presupuesto = 0
+        
+        for idx, row in enumerate(registros):
+            texto_parts = []
+            metadata = {
+                "source": filename,
+                "sheet": sheet_name,
+                "row": idx + 2,
+                "format": "Excel",
+                "tipo_documento": "PRESUPUESTO",
+                "tipo_contenido": "partida_presupuestal"
+            }
+            
+            for tipo, col in columnas.items():
+                if col and pd.notna(row.get(col)):
+                    valor = str(row[col]).strip()
+                    if len(valor) > 1:
+                        texto_parts.append(f"{tipo}: {valor}")
+                        metadata[tipo] = valor
+                        
+                        if tipo == 'monto':
+                            try:
+                                monto_num = float(re.sub(r'[^\d.-]', '', valor))
+                                metadata['monto_numerico'] = monto_num
+                                total_presupuesto += monto_num
+                            except:
+                                pass
+            
+            if texto_parts:
+                chunks.append({
+                    "content": " | ".join(texto_parts),
+                    "metadata": metadata
+                })
+        
+        if total_presupuesto > 0:
+            resumen = {
+                "content": f"RESUMEN PRESUPUESTAL - {sheet_name}\nTotal de partidas: {len(registros)}\nPresupuesto total: ${total_presupuesto:,.2f}",
                 "metadata": {
                     "source": filename,
                     "sheet": sheet_name,
-                    "row": idx + 2,
                     "format": "Excel",
                     "tipo_documento": "PRESUPUESTO",
-                    "tipo_contenido": "partida_presupuestal",
-                    "concepto": concepto,
-                    "monto": monto_total
+                    "tipo_contenido": "resumen_presupuestal",
+                    "total_partidas": len(registros),
+                    "presupuesto_total": total_presupuesto
                 }
             }
-        return None
+            chunks.append(resumen)
+        
+        return chunks
 
-    def _procesar_fila_contratos(self, row, headers, idx, filename, sheet_name):
-        """Procesa fila de contratos/licitaciones"""
-        registro = []
-        numero_contrato = ""
-        proveedor = ""
+    def _procesar_inventario(self, df: pd.DataFrame, filename: str, sheet_name: str) -> List[Dict]:
+        """Procesa datos de inventario/activos"""
+        chunks = []
+        registros = df.to_dict(orient='records')
         
-        for j, header in enumerate(headers):
-            if j >= len(row):
-                continue
-            
-            valor = self._limpiar_valor(row.iloc[j], header)
-            if not valor:
-                continue
-            
-            header_upper = header.upper()
-            
-            if 'CONTRATO' in header_upper or 'LICITACIÓN' in header_upper:
-                numero_contrato = valor
-            elif 'PROVEEDOR' in header_upper or 'CONTRATISTA' in header_upper:
-                proveedor = valor
-            
-            registro.append(f"{header}: {valor}")
+        col_mapping = {
+            'codigo': ['CODIGO', 'CÓDIGO', 'CLAVE', 'ID', 'NUMERO_INVENTARIO', 'FOLIO'],
+            'descripcion': ['DESCRIPCION', 'DESCRIPCIÓN', 'NOMBRE', 'BIEN', 'ACTIVO', 'EQUIPO'],
+            'cantidad': ['CANTIDAD', 'NUMERO', 'TOTAL', 'EXISTENCIAS'],
+            'ubicacion': ['UBICACION', 'UBICACIÓN', 'ALMACEN', 'DEPARTAMENTO', 'RESGUARDO'],
+            'estado': ['ESTADO', 'CONDICION', 'ESTATUS', 'SITUACION']
+        }
         
-        if registro:
-            return {
-                "content": " | ".join(registro),
+        columnas = {tipo: self._encontrar_columna(df, posibles) for tipo, posibles in col_mapping.items()}
+        
+        for idx, row in enumerate(registros):
+            texto_parts = []
+            metadata = {
+                "source": filename,
+                "sheet": sheet_name,
+                "row": idx + 2,
+                "format": "Excel",
+                "tipo_documento": "INVENTARIO",
+                "tipo_contenido": "item_inventario"
+            }
+            
+            for tipo, col in columnas.items():
+                if col and pd.notna(row.get(col)):
+                    valor = str(row[col]).strip()
+                    if len(valor) > 1:
+                        texto_parts.append(f"{tipo}: {valor}")
+                        metadata[tipo] = valor
+            
+            if texto_parts:
+                chunks.append({
+                    "content": " | ".join(texto_parts),
+                    "metadata": metadata
+                })
+        
+        return chunks
+
+    def _procesar_incidencias(self, df: pd.DataFrame, filename: str, sheet_name: str) -> List[Dict]:
+        """Procesa datos de incidencias/baches/reportes"""
+        chunks = []
+        registros = df.to_dict(orient='records')
+        
+        col_mapping = {
+            'id': ['ID', '#', 'NUMERO', 'FOLIO', 'CONSECUTIVO'],
+            'descripcion': ['DESCRIPCION', 'DESCRIPCIÓN', 'DETALLE', 'COMENTARIO', 'OBSERVACIONES'],
+            'ubicacion': ['UBICACION', 'UBICACIÓN', 'DIRECCION', 'LUGAR', 'SITIO'],
+            'gravedad': ['GRAVEDAD', 'SEVERIDAD', 'PRIORIDAD', 'CRITICIDAD', 'NIVEL'],
+            'estado': ['ESTADO', 'ESTATUS', 'SITUACION', 'FASE', 'ETAPA'],
+            'fecha': ['FECHA', 'FECHA_REPORTE', 'REGISTRO', 'CREACION'],
+            'responsable': ['RESPONSABLE', 'ATIENDE', 'ASIGNADO', 'ENCARGADO']
+        }
+        
+        columnas = {tipo: self._encontrar_columna(df, posibles) for tipo, posibles in col_mapping.items()}
+        
+        gravedades = {}
+        estados = {}
+        
+        for idx, row in enumerate(registros):
+            texto_parts = []
+            metadata = {
+                "source": filename,
+                "sheet": sheet_name,
+                "row": idx + 2,
+                "format": "Excel",
+                "tipo_documento": "INCIDENCIAS",
+                "tipo_contenido": "registro_incidencia"
+            }
+            
+            for tipo, col in columnas.items():
+                if col and pd.notna(row.get(col)):
+                    valor = str(row[col]).strip()
+                    if len(valor) > 1:
+                        texto_parts.append(f"{tipo}: {valor}")
+                        metadata[tipo] = valor
+                        
+                        if tipo == 'gravedad':
+                            gravedades[valor] = gravedades.get(valor, 0) + 1
+                        elif tipo == 'estado':
+                            estados[valor] = estados.get(valor, 0) + 1
+            
+            if texto_parts:
+                chunks.append({
+                    "content": " | ".join(texto_parts),
+                    "metadata": metadata
+                })
+        
+        if gravedades or estados:
+            resumen_parts = [f"RESUMEN DE INCIDENCIAS - {sheet_name}", f"Total: {len(registros)}"]
+            
+            if gravedades:
+                resumen_parts.append("\nPOR GRAVEDAD:")
+                for g, c in sorted(gravedades.items(), key=lambda x: x[1], reverse=True):
+                    resumen_parts.append(f"  • {g}: {c}")
+            
+            if estados:
+                resumen_parts.append("\nPOR ESTADO:")
+                for e, c in sorted(estados.items(), key=lambda x: x[1], reverse=True):
+                    resumen_parts.append(f"  • {e}: {c}")
+            
+            chunks.append({
+                "content": "\n".join(resumen_parts),
                 "metadata": {
                     "source": filename,
                     "sheet": sheet_name,
-                    "row": idx + 2,
                     "format": "Excel",
-                    "tipo_documento": "CONTRATOS",
-                    "tipo_contenido": "registro_contrato",
-                    "numero_contrato": numero_contrato,
-                    "proveedor": proveedor
+                    "tipo_documento": "INCIDENCIAS",
+                    "tipo_contenido": "resumen_incidencias",
+                    "total_incidencias": len(registros),
+                    "gravedades": gravedades,
+                    "estados": estados
                 }
-            }
-        return None
+            })
+        
+        return chunks
 
-    def _procesar_fila_inventario(self, row, headers, idx, filename, sheet_name):
-        """Procesa fila de inventario/activos"""
-        registro = []
-        codigo = ""
-        descripcion = ""
+    def _procesar_contratos(self, df: pd.DataFrame, filename: str, sheet_name: str) -> List[Dict]:
+        """Procesa datos de contratos/licitaciones"""
+        chunks = []
+        registros = df.to_dict(orient='records')
         
-        for j, header in enumerate(headers):
-            if j >= len(row):
-                continue
-            
-            valor = self._limpiar_valor(row.iloc[j], header)
-            if not valor:
-                continue
-            
-            header_upper = header.upper()
-            
-            if 'CÓDIGO' in header_upper or 'CLAVE' in header_upper or 'ID' in header_upper:
-                codigo = valor
-            elif 'DESCRIPCIÓN' in header_upper or 'CONCEPTO' in header_upper:
-                descripcion = valor
-            
-            registro.append(f"{header}: {valor}")
+        col_mapping = {
+            'numero': ['NUMERO', 'CONTRATO', 'FOLIO', 'NO_CONTRATO', 'CONTRATO_NO'],
+            'proveedor': ['PROVEEDOR', 'CONTRATISTA', 'EMPRESA', 'RAZON_SOCIAL'],
+            'monto': ['MONTO', 'IMPORTE', 'MONTO_CONTRATO', 'VALOR'],
+            'fecha_inicio': ['FECHA_INICIO', 'INICIO', 'VIGENCIA_DESDE'],
+            'fecha_fin': ['FECHA_FIN', 'TERMINO', 'VIGENCIA_HASTA', 'CONCLUSION'],
+            'objeto': ['OBJETO', 'DESCRIPCION', 'CONCEPTO', 'SERVICIO', 'SUMINISTRO']
+        }
         
-        if registro:
-            return {
-                "content": " | ".join(registro),
-                "metadata": {
-                    "source": filename,
-                    "sheet": sheet_name,
-                    "row": idx + 2,
-                    "format": "Excel",
-                    "tipo_documento": "INVENTARIO",
-                    "tipo_contenido": "item_inventario",
-                    "codigo": codigo,
-                    "descripcion": descripcion
-                }
+        columnas = {tipo: self._encontrar_columna(df, posibles) for tipo, posibles in col_mapping.items()}
+        
+        for idx, row in enumerate(registros):
+            texto_parts = []
+            metadata = {
+                "source": filename,
+                "sheet": sheet_name,
+                "row": idx + 2,
+                "format": "Excel",
+                "tipo_documento": "CONTRATOS",
+                "tipo_contenido": "registro_contrato"
             }
-        return None
-
-    def _procesar_fila_generica(self, row, headers, idx, filename, sheet_name):
-        """Procesa fila genérica para otros tipos"""
-        registro = []
-        
-        for j, header in enumerate(headers):
-            if j >= len(row):
-                continue
             
-            valor = self._limpiar_valor(row.iloc[j], header)
-            if valor:
-                registro.append(f"{header}: {valor}")
+            for tipo, col in columnas.items():
+                if col and pd.notna(row.get(col)):
+                    valor = str(row[col]).strip()
+                    if len(valor) > 1:
+                        texto_parts.append(f"{tipo}: {valor}")
+                        metadata[tipo] = valor
+            
+            if texto_parts:
+                chunks.append({
+                    "content": " | ".join(texto_parts),
+                    "metadata": metadata
+                })
         
-        if registro:
-            return {
-                "content": " | ".join(registro),
-                "metadata": {
-                    "source": filename,
-                    "sheet": sheet_name,
-                    "row": idx + 2,
-                    "format": "Excel",
-                    "tipo_documento": "GENERAL",
-                    "tipo_contenido": "registro_general"
-                }
-            }
-        return None
+        return chunks
 
-    def _crear_resumen_tipo(self, chunks, filename, sheet_name, tipo_documento):
-        """
-        Crea un resumen especializado según el tipo de documento
-        """
-        if not chunks:
+    def _procesar_generico(self, df: pd.DataFrame, filename: str, sheet_name: str) -> List[Dict]:
+        """Procesa cualquier otro tipo de datos de forma genérica"""
+        chunks = []
+        
+        if len(df) * len(df.columns) < 100:
+            text_content = []
+            for idx, row in df.iterrows():
+                row_text = " | ".join([f"{df.columns[i]}: {v}" for i, v in enumerate(row) if pd.notna(v)])
+                if row_text:
+                    text_content.append(row_text)
+            
+            if text_content:
+                chunks.append({
+                    "content": "\n".join(text_content),
+                    "metadata": {
+                        "source": filename,
+                        "sheet": sheet_name,
+                        "format": "Excel",
+                        "tipo_documento": "GENERAL",
+                        "tipo_contenido": "datos_genericos",
+                        "filas": len(df),
+                        "columnas": len(df.columns)
+                    }
+                })
+        else:
+            registros = df.to_dict(orient='records')
+            for idx, row in enumerate(registros):
+                row_clean = {k: v for k, v in row.items() if pd.notna(v)}
+                if row_clean:
+                    chunks.append({
+                        "content": " | ".join([f"{k}: {v}" for k, v in row_clean.items()]),
+                        "metadata": {
+                            "source": filename,
+                            "sheet": sheet_name,
+                            "row": idx + 2,
+                            "format": "Excel",
+                            "tipo_documento": "GENERAL",
+                            "tipo_contenido": "registro_generico"
+                        }
+                    })
+        
+        return chunks
+
+    # ==================== AGREGACIONES Y RESUMENES ====================
+
+    def _agregaciones_obras(self, registros: List[Dict], columnas: Dict, filename: str, sheet_name: str) -> List[Dict]:
+        """Genera agregaciones para obras"""
+        chunks = []
+        
+        tipo_col = columnas.get('tipo')
+        if tipo_col:
+            tipos = {}
+            montos_por_tipo = {}
+            
+            for row in registros:
+                if pd.notna(row.get(tipo_col)):
+                    tipo = str(row[tipo_col]).strip()
+                    tipos[tipo] = tipos.get(tipo, 0) + 1
+                    
+                    monto_col = columnas.get('monto')
+                    if monto_col and pd.notna(row.get(monto_col)):
+                        try:
+                            monto = float(re.sub(r'[^\d.-]', '', str(row[monto_col])))
+                            montos_por_tipo[tipo] = montos_por_tipo.get(tipo, 0) + monto
+                        except:
+                            pass
+            
+            if tipos:
+                content = [f"DISTRIBUCIÓN DE OBRAS POR TIPO - {sheet_name}", f"Total: {len(registros)} obras", ""]
+                for tipo, count in sorted(tipos.items(), key=lambda x: x[1], reverse=True):
+                    content.append(f"• {tipo}: {count} obras")
+                    if tipo in montos_por_tipo:
+                        content.append(f"  Monto total: ${montos_por_tipo[tipo]:,.2f}")
+                
+                chunks.append({
+                    "content": "\n".join(content),
+                    "metadata": {
+                        "source": filename,
+                        "sheet": sheet_name,
+                        "format": "Excel",
+                        "tipo_documento": "OBRAS",
+                        "tipo_contenido": "agregacion_por_tipo",
+                        "distribucion_tipos": tipos
+                    }
+                })
+        
+        monto_col = columnas.get('monto')
+        if monto_col:
+            max_monto = 0
+            obra_max = None
+            
+            for row in registros:
+                if pd.notna(row.get(monto_col)):
+                    try:
+                        monto = float(re.sub(r'[^\d.-]', '', str(row[monto_col])))
+                        if monto > max_monto:
+                            max_monto = monto
+                            obra_max = row
+                    except:
+                        pass
+            
+            if obra_max and max_monto > 0:
+                nombre_col = columnas.get('nombre')
+                nombre = str(obra_max.get(nombre_col, 'No especificado')) if nombre_col else 'No especificado'
+                tipo = str(obra_max.get(columnas.get('tipo'), 'No especificado')) if columnas.get('tipo') else 'No especificado'
+                
+                content = [
+                    f"OBRA CON MAYOR PRESUPUESTO",
+                    f"Nombre: {nombre}",
+                    f"Monto: ${max_monto:,.2f}",
+                    f"Tipo: {tipo}"
+                ]
+                
+                chunks.append({
+                    "content": "\n".join(content),
+                    "metadata": {
+                        "source": filename,
+                        "sheet": sheet_name,
+                        "format": "Excel",
+                        "tipo_documento": "OBRAS",
+                        "tipo_contenido": "mayor_presupuesto",
+                        "monto_maximo": max_monto
+                    }
+                })
+        
+        return chunks
+
+    def _resumen_personal(self, registros: List[Dict], columnas: Dict, filename: str, sheet_name: str) -> Optional[Dict]:
+        """Genera resumen de personal"""
+        puesto_col = columnas.get('puesto')
+        if not puesto_col:
             return None
         
-        if tipo_documento == 'PERSONAL':
-            return self._crear_resumen_personal(chunks, filename, sheet_name)
-        elif tipo_documento == 'OBRAS':
-            return self._crear_resumen_obras(chunks, filename, sheet_name)
-        elif tipo_documento == 'BACHES':
-            return self._crear_resumen_baches(chunks, filename, sheet_name)
-        elif tipo_documento == 'PRESUPUESTO':
-            return self._crear_resumen_presupuesto(chunks, filename, sheet_name)
-        elif tipo_documento == 'CONTRATOS':
-            return self._crear_resumen_contratos(chunks, filename, sheet_name)
-        elif tipo_documento == 'INVENTARIO':
-            return self._crear_resumen_inventario(chunks, filename, sheet_name)
+        puestos = {}
+        for row in registros:
+            if pd.notna(row.get(puesto_col)):
+                puesto = str(row[puesto_col]).strip()
+                puestos[puesto] = puestos.get(puesto, 0) + 1
         
-        return None
-
-    def _crear_resumen_personal(self, chunks, filename, sheet_name):
-        """Resumen para documentos de personal"""
-        personas = set()
-        
-        for chunk in chunks:
-            nombre = chunk['metadata'].get('nombre', '')
-            apellido = chunk['metadata'].get('apellido', '')
-            
-            if nombre and len(nombre) > 2:
-                nombre_completo = f"{nombre} {apellido}".strip()
-                if len(nombre_completo) > 3:
-                    personas.add(nombre_completo)
-        
-        if personas:
-            contenido = [
-                f"RESUMEN DE PERSONAL - {filename}",
-                f"Total de personas: {len(personas)}",
-                "",
-                "LISTA DE PERSONAL:"
-            ]
-            for persona in sorted(personas):
-                contenido.append(f"• {persona}")
+        if puestos:
+            content = [f"RESUMEN DE PERSONAL - {sheet_name}", f"Total: {len(registros)} empleados", "", "DISTRIBUCIÓN POR PUESTO:"]
+            for puesto, count in sorted(puestos.items(), key=lambda x: x[1], reverse=True)[:10]:
+                content.append(f"  • {puesto}: {count}")
             
             return {
-                "content": "\n".join(contenido),
+                "content": "\n".join(content),
                 "metadata": {
                     "source": filename,
                     "sheet": sheet_name,
                     "format": "Excel",
                     "tipo_documento": "PERSONAL",
                     "tipo_contenido": "resumen_personal",
-                    "total_registros": len(personas)
+                    "total_empleados": len(registros),
+                    "distribucion_puestos": puestos
                 }
             }
+        
         return None
 
-    def _crear_resumen_obras(self, chunks, filename, sheet_name):
-        """Resumen para documentos de obras"""
-        obras = []
-        montos = []
-        
-        for chunk in chunks:
-            metadata = chunk['metadata']
-            if metadata.get('ubicacion'):
-                obras.append(metadata['ubicacion'])
-            if metadata.get('monto'):
-                try:
-                    montos.append(float(metadata['monto']))
-                except:
-                    pass
-        
-        contenido = [
-            f"RESUMEN DE OBRAS - {filename}",
-            f"Total de registros: {len(chunks)}",
-            f"Ubicaciones identificadas: {len(set(obras))}"
-        ]
-        
-        if montos:
-            contenido.append(f"Presupuesto total: ${sum(montos):,.2f}")
-        
-        return {
-            "content": "\n".join(contenido),
-            "metadata": {
-                "source": filename,
-                "sheet": sheet_name,
-                "format": "Excel",
-                "tipo_documento": "OBRAS",
-                "tipo_contenido": "resumen_obras",
-                "total_registros": len(chunks)
-            }
-        }
-
-    def _crear_resumen_baches(self, chunks, filename, sheet_name):
-        """Resumen para documentos de baches"""
-        ubicaciones = set()
-        
-        for chunk in chunks:
-            if chunk['metadata'].get('ubicacion'):
-                ubicaciones.add(chunk['metadata']['ubicacion'])
-        
-        contenido = [
-            f"RESUMEN DE BACHES - {filename}",
-            f"Total de reportes: {len(chunks)}",
-            f"Ubicaciones afectadas: {len(ubicaciones)}"
-        ]
-        
-        return {
-            "content": "\n".join(contenido),
-            "metadata": {
-                "source": filename,
-                "sheet": sheet_name,
-                "format": "Excel",
-                "tipo_documento": "BACHES",
-                "tipo_contenido": "resumen_baches",
-                "total_registros": len(chunks)
-            }
-        }
-
-    def _crear_resumen_presupuesto(self, chunks, filename, sheet_name):
-        """Resumen para documentos de presupuesto"""
-        total = 0
-        conceptos = set()
-        
-        for chunk in chunks:
-            if chunk['metadata'].get('monto'):
-                total += chunk['metadata']['monto']
-            if chunk['metadata'].get('concepto'):
-                conceptos.add(chunk['metadata']['concepto'])
-        
-        contenido = [
-            f"RESUMEN PRESUPUESTAL - {filename}",
-            f"Total de partidas: {len(chunks)}",
-            f"Monto total: ${total:,.2f}",
-            f"Conceptos distintos: {len(conceptos)}"
-        ]
-        
-        return {
-            "content": "\n".join(contenido),
-            "metadata": {
-                "source": filename,
-                "sheet": sheet_name,
-                "format": "Excel",
-                "tipo_documento": "PRESUPUESTO",
-                "tipo_contenido": "resumen_presupuesto",
-                "total_registros": len(chunks),
-                "monto_total": total
-            }
-        }
-
-    def _crear_resumen_contratos(self, chunks, filename, sheet_name):
-        """Resumen para documentos de contratos"""
-        contratos = set()
-        proveedores = set()
-        
-        for chunk in chunks:
-            if chunk['metadata'].get('numero_contrato'):
-                contratos.add(chunk['metadata']['numero_contrato'])
-            if chunk['metadata'].get('proveedor'):
-                proveedores.add(chunk['metadata']['proveedor'])
-        
-        contenido = [
-            f"RESUMEN DE CONTRATOS - {filename}",
-            f"Total de registros: {len(chunks)}",
-            f"Contratos identificados: {len(contratos)}",
-            f"Proveedores: {len(proveedores)}"
-        ]
-        
-        return {
-            "content": "\n".join(contenido),
-            "metadata": {
-                "source": filename,
-                "sheet": sheet_name,
-                "format": "Excel",
-                "tipo_documento": "CONTRATOS",
-                "tipo_contenido": "resumen_contratos",
-                "total_registros": len(chunks)
-            }
-        }
-
-    def _crear_resumen_inventario(self, chunks, filename, sheet_name):
-        """Resumen para documentos de inventario"""
-        items = set()
-        
-        for chunk in chunks:
-            if chunk['metadata'].get('descripcion'):
-                items.add(chunk['metadata']['descripcion'])
-            elif chunk['metadata'].get('codigo'):
-                items.add(chunk['metadata']['codigo'])
-        
-        contenido = [
-            f"RESUMEN DE INVENTARIO - {filename}",
-            f"Total de items: {len(chunks)}",
-            f"Items distintos: {len(items)}"
-        ]
-        
-        return {
-            "content": "\n".join(contenido),
-            "metadata": {
-                "source": filename,
-                "sheet": sheet_name,
-                "format": "Excel",
-                "tipo_documento": "INVENTARIO",
-                "tipo_contenido": "resumen_inventario",
-                "total_registros": len(chunks)
-            }
-        }
-
-    def _crear_metadatos(self, filename, tipo_documento, total_chunks):
-        """Crea chunk de metadatos"""
-        contenido = [
-            f"METADATOS DEL DOCUMENTO",
-            f"Archivo: {filename}",
-            f"Tipo documento: {tipo_documento}",
-            f"Fecha procesamiento: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-            f"Total chunks generados: {total_chunks}"
-        ]
-        
-        return {
-            "content": "\n".join(contenido),
-            "metadata": {
-                "source": filename,
-                "format": "Excel",
-                "tipo_documento": tipo_documento,
-                "tipo_contenido": "metadatos",
-                "total_chunks": total_chunks
-            }
-        }
-
-    def _crear_chunk_error(self, filename, error):
+    def _crear_chunk_error(self, filename: str, error: str) -> Dict:
         """Crea chunk de error"""
         return {
             "content": f"ERROR EN PROCESAMIENTO\nArchivo: {filename}\nError: {error}",
@@ -940,6 +939,9 @@ class DocumentProcessor:
                 "error": error
             }
         }
+    
+
+    # ==================== MÉTODO PRINCIPAL ====================
 
     def process_file(self, file_path: str) -> List[Dict]:
         """
