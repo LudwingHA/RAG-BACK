@@ -1176,9 +1176,9 @@ class RAGService:
             relevant_docs = (chunks_personal[:8] + chunks_otros[:2])[:10]
             logger.info(f"Priorizando personal: {len(chunks_personal)} chunks encontrados")
         elif any(word in query_lower for word in ['cuantos', 'cuántos', 'total']):
-            relevant_docs = (chunks_personal[:20] + chunks_resumen[:10] + chunks_otros[:10])[:40]
+            relevant_docs = (chunks_personal[:5] + chunks_resumen[:3] + chunks_otros[:2])[:10]
         else:
-            relevant_docs = (chunks_personal[:20] + chunks_resumen[:10] + chunks_otros[:10])[:40]
+            relevant_docs = (chunks_personal[:4] + chunks_resumen[:3] + chunks_otros[:3])[:10]
         
         if not relevant_docs:
             relevant_docs = results[:5]
